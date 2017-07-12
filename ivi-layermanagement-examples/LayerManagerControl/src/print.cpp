@@ -94,6 +94,8 @@ void printScreenProperties(unsigned int screenid, const char* prefix)
         return;
     }
 
+    cout << prefix << "- connector name:       " << screenProperties.connectorName << "\n";
+
     cout << prefix << "- resolution:           x=" << screenProperties.screenWidth << ", y="
             << screenProperties.screenHeight << "\n";
 
@@ -222,9 +224,7 @@ void printSurfaceProperties(unsigned int surfaceid, const char* prefix)
     cout << prefix << "- opacity:            " << p.opacity << "\n";
     cout << prefix << "- visibility:         " << p.visibility << "\n";
 
-    cout << prefix << "- counters:           frame=" << p.frameCounter
-            << ", draw=" << p.drawCounter << ", update=" << p.updateCounter
-            << "\n";
+    cout << prefix << "- frame counter:      " << p.frameCounter << "\n";
 
     cout << prefix << "- on layer:           ";
     int layerCount = 0;

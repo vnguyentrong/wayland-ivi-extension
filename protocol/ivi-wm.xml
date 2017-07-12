@@ -87,6 +87,13 @@
       <arg name="layer_id" type="uint"/>
     </event>
 
+    <event name="connector_name">
+      <description summary="advertise connector name of the corresponding output">
+        Sent immediately after creating the ivi_wm_screen object.
+      </description>
+      <arg name="process_name" type="string"/>
+    </event>
+
     <enum name="error">
        <entry name="no_layer" value="0"
               summary="the layer with given id does not exist"/>
@@ -584,11 +591,8 @@
         logging and tracing support in IVI systems.
       </description>
       <arg name="surface_id" type="uint"/>
-      <arg name="redraw_count" type="uint"/>
       <arg name="frame_count" type="uint"/>
-      <arg name="update_count" type="uint"/>
       <arg name="pid" type="uint"/>
-      <arg name="process_name" type="string" allow-null="true"/>
     </event>
 
     <event name="layer_surface_added">
