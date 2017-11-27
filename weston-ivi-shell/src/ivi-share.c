@@ -345,7 +345,7 @@ alloc_share_nativesurface(struct weston_surface *surface, uint32_t id, uint32_t 
                           struct ivi_shell_share_ext *shell_ext)
 {
     struct ivi_share_nativesurface *nativesurface =
-        malloc(sizeof(struct ivi_share_nativesurface));
+        calloc(1, sizeof(struct ivi_share_nativesurface));
     if (NULL == nativesurface) {
         return NULL;
     }
@@ -353,10 +353,6 @@ alloc_share_nativesurface(struct weston_surface *surface, uint32_t id, uint32_t 
     nativesurface->id = id;
     nativesurface->surface = surface;
     nativesurface->bufferType = bufferType;
-    nativesurface->name = 0;
-    nativesurface->width = 0;
-    nativesurface->height = 0;
-    nativesurface->stride = 0;
     nativesurface->format = format;
     nativesurface->surface_id = surface_id;
     nativesurface->shell_ext = shell_ext;
@@ -504,7 +500,7 @@ share_get_ivi_share_surface(struct wl_client *client, struct wl_resource *resour
 
     nativesurf = find_nativesurface(shsurf, shell_ext);
     if (nativesurf == NULL) {
-        nativesurf = alloc_share_nativesurface(shsurf->surface, id, 0,
+        nativesurf = alloc_share_nativesurface(shsurf->surface, id, shsurf->surface_id,
                                                (int32_t)IVI_SHARE_SURFACE_TYPE_GBM,
                                                (int32_t)IVI_SHARE_SURFACE_FORMAT_ARGB8888,
                                                shell_ext);
@@ -593,8 +589,7 @@ bind_share_interface(struct wl_client *p_client, void *p_data,
 }
 
 static void
-send_to_client(struct ivi_share_nativesurface *p_nativesurface, uint32_t send_flag,
-               struct ivi_shell_share_ext *shell_ext)
+send_to_client(struct ivi_share_nativesurface *p_nativesurface, uint32_t send_flag)
 {
     struct ivi_share_nativesurface_client_link *p_link = NULL;
 
@@ -621,7 +616,7 @@ send_to_client(struct ivi_share_nativesurface *p_nativesurface, uint32_t send_fl
         }
         if ((IVI_SHAREBUFFER_DAMAGE & send_flag) == IVI_SHAREBUFFER_DAMAGE) {
             send_damage(p_link->resource, p_nativesurface->id,
-                        get_buffer_name(p_nativesurface->surface, shell_ext));
+                        get_buffer_name(p_nativesurface));
         }
     }
 }
@@ -652,8 +647,8 @@ send_nativesurface_event(struct wl_listener *listener, void *data)
             continue;
         }
 
-        p_nativesurface->send_flag = update_buffer_nativesurface(p_nativesurface, shell_ext);
-        send_to_client(p_nativesurface, p_nativesurface->send_flag, shell_ext);
+        p_nativesurface->send_flag = update_buffer_nativesurface(p_nativesurface);
+        send_to_client(p_nativesurface, p_nativesurface->send_flag);
     }
 }
 
