@@ -157,11 +157,9 @@ add_accepted_seat(struct ivisurface *surface, const char *seat)
 }
 
 static int
-remove_accepted_seat(struct ivisurface *surface, const char *seat)
+remove_if_seat_accepted(struct ivisurface *surface, const char *seat)
 {
     int ret = 0;
-    const struct ivi_layout_interface *interface =
-            surface->shell->interface;
 
     struct seat_focus *st_focus = get_accepted_seat(surface, seat);
 
@@ -171,10 +169,6 @@ remove_accepted_seat(struct ivisurface *surface, const char *seat)
         free(st_focus->seat_name);
         free(st_focus);
 
-    } else {
-        weston_log("%s: Warning: seat '%s' not found for surface %u\n",
-                  __FUNCTION__, seat,
-                  interface->get_id_of_surface(surface->layout_surface));
     }
     return ret;
 }
@@ -920,6 +914,8 @@ handle_seat_destroy(struct wl_listener *listener, void *data)
     struct seat_ctx *ctx = wl_container_of(listener, ctx, destroy_listener);
     struct weston_seat *seat = data;
     struct input_controller *controller;
+    struct input_context* input_ctx = ctx->input_ctx;
+    struct ivisurface *surf;
 
     if (ctx->keyboard_grab.keyboard)
         keyboard_grab_cancel(&ctx->keyboard_grab);
@@ -927,6 +923,12 @@ handle_seat_destroy(struct wl_listener *listener, void *data)
         pointer_grab_cancel(&ctx->pointer_grab);
     if (ctx->touch_grab.touch)
         touch_grab_cancel(&ctx->touch_grab);
+
+    /* Remove seat acceptance from surfaces which have input acceptance from
+     * this seat */
+    wl_list_for_each(surf, &input_ctx->ivishell->list_surface, link) {
+         remove_if_seat_accepted(surf, ctx->name_seat);
+    }
 
     wl_list_for_each(controller, &ctx->input_ctx->controller_list, link) {
         ivi_input_send_seat_destroyed(controller->resource,
@@ -944,6 +946,9 @@ handle_seat_create(struct wl_listener *listener, void *data)
     struct input_context *input_ctx = wl_container_of(listener, input_ctx,
                                                       seat_create_listener);
     struct input_controller *controller;
+    struct ivisurface *surf;
+    const struct ivi_layout_interface *interface =
+        input_ctx->ivishell->interface;
     struct seat_ctx *ctx = calloc(1, sizeof *ctx);
     if (ctx == NULL) {
         weston_log("%s: Failed to allocate memory\n", __FUNCTION__);
@@ -969,6 +974,17 @@ handle_seat_create(struct wl_listener *listener, void *data)
         ivi_input_send_seat_created(controller->resource,
                                     seat->seat_name,
                                     get_seat_capabilities(seat));
+    }
+
+    /* If default seat is created, we have to add it to the accepted_seat_list
+     * of all surfaces. Also we have to send an acceptance event to all clients */
+    if (!strcmp(ctx->name_seat, "default")) {
+        wl_list_for_each(surf, &input_ctx->ivishell->list_surface, link) {
+            add_accepted_seat(surf, "default");
+            send_input_acceptance(input_ctx,
+                                 interface->get_id_of_surface(surf->layout_surface),
+                                 "default", ILM_TRUE);
+        }
     }
 }
 
@@ -1024,12 +1040,17 @@ handle_surface_create(struct wl_listener *listener, void *data)
     struct ivisurface *ivisurface = (struct ivisurface *) data;
     const struct ivi_layout_interface *interface =
         input_ctx->ivishell->interface;
+    struct seat_ctx *seat_ctx;
 
     wl_list_init(&ivisurface->accepted_seat_list);
-    add_accepted_seat(ivisurface, "default");
-    send_input_acceptance(input_ctx,
-                          interface->get_id_of_surface(ivisurface->layout_surface),
-                          "default", ILM_TRUE);
+
+    seat_ctx = input_ctrl_get_seat_ctx(input_ctx, "default");
+    if (seat_ctx) {
+        add_accepted_seat(ivisurface, "default");
+        send_input_acceptance(input_ctx,
+                              interface->get_id_of_surface(ivisurface->layout_surface),
+                              "default", ILM_TRUE);
+    }
 }
 
 static void
@@ -1150,7 +1171,7 @@ setup_input_acceptance(struct input_context *ctx,
                     }
                 }
 
-                found_seat = remove_accepted_seat(ivisurface, seat);
+                found_seat = remove_if_seat_accepted(ivisurface, seat);
             }
         }
     }
