@@ -725,9 +725,8 @@ weston_dlt_thread_function(void *data)
             ssize_t size;
 
             i++;
-            size = read(wlcontext->pipefd[0], &str[i], 1);
-            if (size == -1)
-                fprintf(stderr, "%s: read() failed: errno=%i, (%s)\n", __func__, errno, strerror(errno));
+            if(read(wlcontext->pipefd[0], &str[i], 1) < 0)
+                printf("read failed : %s", strerror(errno));
         } while (str[i] != '\n');
 
         if (strcmp(str,"")!=0)
@@ -833,6 +832,7 @@ int main (int argc, const char * argv[])
     WaylandContextStruct* wlcontext;
     BkGndSettingsStruct* bkgnd_settings;
 
+    struct sigaction sigint;
     int ret = 0;
     sigset_t mask;
 
@@ -896,6 +896,16 @@ int main (int argc, const char * argv[])
 #ifdef LIBWESTON_DEBUG_PROTOCOL
     if (!wl_list_empty(&wlcontext->stream_list) &&
             wlcontext->debug_iface) {
+        /* create the pipe b/w stdout and stdin
+         * stdout - write end
+         * stdin - read end
+         * weston will write to stdout and the
+         * dlt_ctx_thread will read from stdin */
+        if((pipe(wlcontext->pipefd)) < 0)
+            printf("Error in pipe() processing : %s", strerror(errno));
+
+        dup2(wlcontext->pipefd[1], STDOUT_FILENO);
+
         wlcontext->thread_running = 1;
         pthread_create(&wlcontext->dlt_ctx_thread, NULL,
                 weston_dlt_thread_function, wlcontext);
