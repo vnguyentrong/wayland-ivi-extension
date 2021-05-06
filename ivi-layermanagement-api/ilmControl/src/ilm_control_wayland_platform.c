@@ -56,7 +56,7 @@ struct screen_context {
 
     struct wl_output *output;
     struct ivi_wm_screen *controller;
-    t_ilm_uint id_screen;
+    t_ilm_int id_screen;
     t_ilm_uint name;
     int32_t transform;
 
@@ -923,6 +923,7 @@ registry_handle_control(void *data,
 
     } else if (strcmp(interface, "wl_output") == 0) {
         struct screen_context *ctx_scrn = calloc(1, sizeof *ctx_scrn);
+        ctx_scrn->id_screen = -1;
 
         if (ctx_scrn == NULL) {
             fprintf(stderr, "Failed to allocate memory for screen_context\n");
@@ -1441,7 +1442,7 @@ get_screen_context_by_id(struct wayland_context *ctx, uint32_t id_screen)
     }
 
     wl_list_for_each(ctx_scrn, &ctx->list_screen, link) {
-        if (ctx_scrn->id_screen == id_screen) {
+        if (ctx_scrn->id_screen == (int) id_screen) {
             return ctx_scrn;
         }
     }
@@ -1584,7 +1585,7 @@ ilm_getScreenResolution(t_ilm_uint screenID, t_ilm_uint* pWidth, t_ilm_uint* pHe
     {
         struct screen_context *ctx_scrn;
         wl_list_for_each(ctx_scrn, &ctx->wl.list_screen, link) {
-            if (screenID == ctx_scrn->id_screen) {
+            if ((int) screenID == ctx_scrn->id_screen) {
                 *pWidth = ctx_scrn->prop.screenWidth;
                 *pHeight = ctx_scrn->prop.screenHeight;
                 returnValue = ILM_SUCCESS;
