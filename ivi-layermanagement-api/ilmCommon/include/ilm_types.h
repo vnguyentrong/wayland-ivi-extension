@@ -257,6 +257,14 @@ typedef enum
     ILM_ERROR_POLL = 2              /*!< ErrorCode if Poll returns an error */
 }t_ilm_shutdown_error_type;
 
+/**
+ * enum representing the status of wayland output in notification callback
+ */
+typedef enum
+{
+    ILM_NOTIFICATION_SCREEN_CREATED = 1,        /*!< StatusCode if a wayland output is created */
+    ILM_NOTIFICATION_SCREEN_DESTROYED = 2       /*!< StatusCode if a wayland output is destroyed */
+}t_ilm_screen_notification_type;
 
 /**
  * Typedef for notification callback on property changes of a layer
@@ -287,4 +295,12 @@ typedef void(*notificationFunc)(ilmObjectType object,
 typedef void(*shutdownNotificationFunc)(t_ilm_shutdown_error_type error_type,
                                         int errornum,
                                         void* user_data);
+
+/**
+ * Typedef for notification callback on wayland output creation/deletion
+ */
+typedef void(*screenNotificationFunc)(t_ilm_screen_notification_type status,
+                                      t_ilm_int id,
+                                      t_ilm_const_string name,
+                                      void* user_data);
 #endif /* _ILM_TYPES_H_*/

@@ -29,6 +29,9 @@ ILM_EXPORT ilmErrorTypes ilmControl_init(t_ilm_nativedisplay);
 ILM_EXPORT ilmErrorTypes ilmControl_registerShutdownNotification(
 				shutdownNotificationFunc callback,
 				void *user_data);
+ILM_EXPORT ilmErrorTypes ilmControl_registerScreenNotification(
+				screenNotificationFunc callback,
+				void *user_data);
 ILM_EXPORT void ilmControl_destroy(void);
 
 static pthread_mutex_t g_initialize_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -104,6 +107,12 @@ ILM_EXPORT ilmErrorTypes
 ilm_registerShutdownNotification(shutdownNotificationFunc callback, void *user_data)
 {
     return ilmControl_registerShutdownNotification(callback, user_data);
+}
+
+ILM_EXPORT ilmErrorTypes
+ilm_registerScreenNotification(screenNotificationFunc callback, void *user_data)
+{
+    return ilmControl_registerScreenNotification(callback, user_data);
 }
 
 ILM_EXPORT ilmErrorTypes
