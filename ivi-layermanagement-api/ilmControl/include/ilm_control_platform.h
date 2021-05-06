@@ -61,6 +61,12 @@ struct ilm_control_context {
 
     shutdownNotificationFunc notification;
     void *notification_user_data;
+
+    struct {
+        struct wl_list pending;
+        screenNotificationFunc callback;
+        void *user_data;
+    } screen_notification;
 };
 
 struct seat_context {
