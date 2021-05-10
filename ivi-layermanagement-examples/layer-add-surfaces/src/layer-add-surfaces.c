@@ -125,6 +125,16 @@ static void shutdownCallbackFunction(t_ilm_shutdown_error_type error_type,
     exit(1);
 }
 
+static void screenCallbackFunction(t_ilm_screen_notification_type status,
+                                   t_ilm_int id, t_ilm_const_string name,
+                                   void* user_data)
+{
+    (void) user_data;
+
+    printf("layer-add-surfaces: hot-plug event, %s [id = %d] %s\n", name, id,
+           status == ILM_NOTIFICATION_SCREEN_CREATED ? "connected" : "disconnected");
+}
+
 /* Choose the display with the largest resolution.*/
 static t_ilm_uint choose_screen(void)
 {
@@ -265,6 +275,7 @@ int main (int argc, char *argv[])
     }
 
     ilm_registerShutdownNotification(shutdownCallbackFunction, NULL);
+    ilm_registerScreenNotification(screenCallbackFunction, NULL);
 
     screen_ID = choose_screen();
     ilm_layerCreateWithDimension(&layer, screenWidth, screenHeight);
