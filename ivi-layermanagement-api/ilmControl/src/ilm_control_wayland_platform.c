@@ -56,7 +56,7 @@ struct screen_context {
 
     struct wl_output *output;
     struct ivi_wm_screen *controller;
-    t_ilm_uint id_screen;
+    t_ilm_int id_screen;
     t_ilm_uint name;
     int32_t transform;
 
@@ -65,6 +65,13 @@ struct screen_context {
     struct wl_array render_order;
 
     struct wayland_context *ctx;
+};
+
+struct screen_notification_context {
+    struct wl_list link;
+
+    struct screen_context *ctx_scrn;
+    t_ilm_screen_notification_type status;
 };
 
 struct screenshot_context {
@@ -893,12 +900,88 @@ static struct ivi_input_listener input_listener = {
 };
 
 static void
+update_pending_screen_status(struct ilm_control_context *ctx)
+{
+    struct wayland_context *ctx_wl = &ctx->wl;
+    struct screen_context *ctx_scrn;
+    struct screen_notification_context *notify, *notify_next;
+
+    if (wl_list_empty(&ctx->screen_notification.pending))
+        return;
+
+    wl_list_for_each_safe(notify, notify_next,
+                          &ctx->screen_notification.pending, link) {
+        if (!ctx->screen_notification.callback) {
+            fprintf(stderr, "%s: Error: invalid screen notification cb\n",
+                    __func__);
+            goto error;
+        }
+
+        wl_list_for_each(ctx_scrn, &ctx_wl->list_screen, link) {
+            if (ctx_scrn == notify->ctx_scrn)
+                break;
+        }
+
+        if (ctx_scrn != notify->ctx_scrn) {
+            fprintf(stderr, "%s: Error: invalid screen\n", __func__);
+            goto error;
+        }
+
+        /* we will notify later if the screen attributes are not yet populated */
+        if ((ctx_scrn->id_screen == -1) || !ctx_scrn->prop.connectorName)
+            continue;
+
+        ctx->screen_notification.callback(notify->status,
+                                          ctx_scrn->id_screen,
+                                          ctx_scrn->prop.connectorName,
+                                          ctx->screen_notification.user_data);
+error:
+        wl_list_remove(&notify->link);
+        free(notify);
+    }
+}
+
+static void
+update_screen_status(struct ilm_control_context *ctx,
+                     struct screen_context *ctx_scrn,
+                     t_ilm_screen_notification_type status)
+{
+
+    if (!ctx->screen_notification.callback)
+        return;
+
+    if ((ctx_scrn->id_screen == -1) || !ctx_scrn->prop.connectorName) {
+        if (status == ILM_NOTIFICATION_SCREEN_CREATED) {
+            struct screen_notification_context *notification =
+                calloc(1, sizeof(*notification));
+
+            notification->ctx_scrn = ctx_scrn;
+            notification->status = status;
+
+            wl_list_insert(&ctx->screen_notification.pending,
+                           &notification->link);
+        }
+        else {
+            fprintf(stderr, "%s: Error: invalid screen properties\n",
+                    __func__);
+        }
+
+        return;
+    }
+
+    ctx->screen_notification.callback(status, ctx_scrn->id_screen,
+                                      ctx_scrn->prop.connectorName,
+                                      ctx->screen_notification.user_data);
+}
+
+static void
 registry_handle_control(void *data,
                        struct wl_registry *registry,
                        uint32_t name, const char *interface,
                        uint32_t version)
 {
-    struct wayland_context *ctx = data;
+    struct ilm_control_context *ctx_ilm = (struct ilm_control_context *) data;
+    struct wayland_context *ctx = &ctx_ilm->wl;
     (void)version;
 
     if (strcmp(interface, "ivi_wm") == 0) {
@@ -923,6 +1006,7 @@ registry_handle_control(void *data,
 
     } else if (strcmp(interface, "wl_output") == 0) {
         struct screen_context *ctx_scrn = calloc(1, sizeof *ctx_scrn);
+        ctx_scrn->id_screen = -1;
 
         if (ctx_scrn == NULL) {
             fprintf(stderr, "Failed to allocate memory for screen_context\n");
@@ -944,28 +1028,33 @@ registry_handle_control(void *data,
             return;
         }
 
+        ctx_scrn->ctx = ctx;
+        ctx_scrn->name = name;
+        wl_list_insert(&ctx->list_screen, &ctx_scrn->link);
+
         if (ctx->controller) {
             ctx_scrn->controller = ivi_wm_create_screen(ctx->controller, ctx_scrn->output);
             ivi_wm_screen_add_listener(ctx_scrn->controller, &wm_screen_listener,
                                        ctx_scrn);
-        }
 
-        ctx_scrn->ctx = ctx;
-        ctx_scrn->name = name;
-        wl_list_insert(&ctx->list_screen, &ctx_scrn->link);
+            update_screen_status(ctx_ilm, ctx_scrn, ILM_NOTIFICATION_SCREEN_CREATED);
+        }
     }
 }
 
 static void
 registry_handle_control_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
-    struct wayland_context *ctx = data;
+    struct ilm_control_context *ctx_ilm = (struct ilm_control_context *) data;
+    struct wayland_context *ctx = &ctx_ilm->wl;
     struct screen_context *ctx_scrn, *next;
 
     /*remove wl_output and corresponding screen context*/
     wl_list_for_each_safe(ctx_scrn, next, &ctx->list_screen, link) {
         if(ctx_scrn->name == name)
         { fprintf(stderr,"output_removed \n");
+            update_screen_status(ctx_ilm, ctx_scrn, ILM_NOTIFICATION_SCREEN_DESTROYED);
+
             if (ctx_scrn->controller != NULL) {
                 ivi_wm_screen_destroy(ctx_scrn->controller);
             }
@@ -992,6 +1081,16 @@ struct ilm_control_context ilm_context;
 static void destroy_control_resources(void)
 {
     struct ilm_control_context *ctx = &ilm_context;
+    struct screen_notification_context *notify, *notify_next;
+
+    wl_list_for_each_safe(notify, notify_next,
+                          &ctx->screen_notification.pending, link) {
+        wl_list_remove(&notify->link);
+        free(notify);
+    }
+
+    ctx->screen_notification.callback = NULL;
+    ctx->screen_notification.user_data = NULL;
 
     // free resources of output objects
     if (ctx->wl.controller) {
@@ -1106,6 +1205,28 @@ error:
     return returnValue;
 }
 
+ILM_EXPORT ilmErrorTypes
+ilmControl_registerScreenNotification(screenNotificationFunc callback, void *user_data)
+{
+    ilmErrorTypes returnValue = ILM_FAILED;
+    struct ilm_control_context *ctx = sync_and_acquire_instance();
+
+    if (!callback)
+    {
+        fprintf(stderr, "[Error] screenNotificationFunc is invalid\n");
+        goto error;
+    }
+
+    ctx->screen_notification.callback = callback;
+    ctx->screen_notification.user_data = user_data;
+
+    returnValue = ILM_SUCCESS;
+
+error:
+    release_instance();
+    return returnValue;
+}
+
 ILM_EXPORT void
 ilmControl_destroy(void)
 {
@@ -1152,6 +1273,11 @@ ilmControl_init(t_ilm_nativedisplay nativedisplay)
     ctx->shutdown_fd = -1;
     ctx->notification = NULL;
     ctx->notification_user_data = NULL;
+
+    ctx->screen_notification.callback = NULL;
+    ctx->screen_notification.user_data = NULL;
+
+    wl_list_init(&ctx->screen_notification.pending);
 
     ctx->wl.display = (struct wl_display*)nativedisplay;
 
@@ -1239,6 +1365,8 @@ control_thread(void *p_ret)
             wl_display_dispatch_queue_pending(display, queue);
             unlock_context(ctx);
         }
+
+        update_pending_screen_status(ctx);
 
         if (wl_display_flush(display) == -1)
         {
@@ -1441,7 +1569,7 @@ get_screen_context_by_id(struct wayland_context *ctx, uint32_t id_screen)
     }
 
     wl_list_for_each(ctx_scrn, &ctx->list_screen, link) {
-        if (ctx_scrn->id_screen == id_screen) {
+        if (ctx_scrn->id_screen == (int) id_screen) {
             return ctx_scrn;
         }
     }
@@ -1584,7 +1712,7 @@ ilm_getScreenResolution(t_ilm_uint screenID, t_ilm_uint* pWidth, t_ilm_uint* pHe
     {
         struct screen_context *ctx_scrn;
         wl_list_for_each(ctx_scrn, &ctx->wl.list_screen, link) {
-            if (screenID == ctx_scrn->id_screen) {
+            if ((int) screenID == ctx_scrn->id_screen) {
                 *pWidth = ctx_scrn->prop.screenWidth;
                 *pHeight = ctx_scrn->prop.screenHeight;
                 returnValue = ILM_SUCCESS;

@@ -1550,7 +1550,6 @@ destroy_screen(struct iviscreen *iviscrn)
 
     wl_resource_for_each_safe(resource, next, &iviscrn->resource_list) {
         wl_resource_set_destructor(resource, NULL);
-        wl_resource_destroy(resource);
     }
 
     wl_list_remove(&iviscrn->link);
