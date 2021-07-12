@@ -667,6 +667,13 @@ controller_surface_get(struct wl_client *client, struct wl_resource *resource,
 
     mask = convert_protocol_enum(param);
 
+    if ((int32_t)surface_id == ctrl->shell->bkgnd_surface_id) {
+        ivi_wm_send_surface_error(resource, surface_id,
+                                  IVI_WM_SURFACE_ERROR_NO_SURFACE,
+                                  "surface_get: the surface with given id is the hidden background surface");
+        return;
+    }
+
     layout_surface = lyt->get_surface_from_id(surface_id);
     if (!layout_surface) {
         ivi_wm_send_surface_error(resource, surface_id,
