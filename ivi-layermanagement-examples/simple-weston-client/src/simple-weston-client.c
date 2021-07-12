@@ -856,7 +856,12 @@ int main (int argc, const char * argv[])
          * stdin - read end
          * weston will write to stdout and the
          * dlt_ctx_thread will read from stdin */
-        pipe(wlcontext->pipefd);
+        ret = pipe(wlcontext->pipefd);
+        if (ret != 0) {
+            fprintf(stderr, "pipe() failed: ret=%i, errno=%i (%s)\n",
+                    ret, errno, strerror(errno));
+            return ret;
+        }
         dup2(wlcontext->pipefd[1], STDOUT_FILENO);
 
         wlcontext->thread_running = 1;
