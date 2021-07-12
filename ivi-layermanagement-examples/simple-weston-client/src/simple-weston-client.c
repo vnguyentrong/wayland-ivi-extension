@@ -702,7 +702,6 @@ weston_dlt_thread_function(void *data)
     WaylandContextStruct* wlcontext;
     char apid[DLT_ID_SIZE];
     char ctid[DLT_ID_SIZE];
-    char *temp;
     DLT_DECLARE_CONTEXT(weston_dlt_context)
 
     wlcontext = (WaylandContextStruct*)data;
@@ -812,7 +811,6 @@ int main (int argc, const char * argv[])
     BkGndSettingsStruct* bkgnd_settings;
 
     struct sigaction sigint;
-    int offset = 0;
     int ret = 0;
 
     sigint.sa_handler = signal_int;
