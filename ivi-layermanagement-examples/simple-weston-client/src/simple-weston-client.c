@@ -723,8 +723,12 @@ weston_dlt_thread_function(void *data)
 
         /* read from std-in(read end of pipe) till newline char*/
         do {
+            ssize_t size;
+
             i++;
-            read(wlcontext->pipefd[0], &str[i], 1);
+            size = read(wlcontext->pipefd[0], &str[i], 1);
+            if (size == -1)
+                fprintf(stderr, "%s: read() failed: errno=%i, (%s)\n", __func__, errno, strerror(errno));
         } while (str[i] != '\n');
 
         if (strcmp(str,"")!=0)
