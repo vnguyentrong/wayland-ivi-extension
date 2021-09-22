@@ -1556,6 +1556,7 @@ destroy_screen(struct iviscreen *iviscrn)
     struct wl_resource *resource, *next;
 
     wl_resource_for_each_safe(resource, next, &iviscrn->resource_list) {
+        wl_resource_set_user_data(resource, NULL);
         wl_resource_set_destructor(resource, NULL);
     }
 
