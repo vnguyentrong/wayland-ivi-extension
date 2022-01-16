@@ -28,6 +28,7 @@
 
 #include "config.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -427,6 +428,42 @@ create_screenshot_file(off_t size) {
     return fd;
 }
 
+/** Read the current time from the Presentation clock
+ *
+ * \param compositor
+ * \param[out] ts The current time.
+ *
+ * \note Reading the current time in user space is always imprecise to some
+ * degree.
+ *
+ * This function is never meant to fail. If reading the clock does fail,
+ * an error message is logged and a zero time is returned. Callers are not
+ * supposed to detect or react to failures.
+ *
+ * \ingroup compositor
+ */
+static void
+ivi_weston_compositor_read_presentation_clock(
+			const struct weston_compositor *compositor,
+			struct timespec *ts)
+{
+	static bool warned;
+	int ret;
+
+	ret = clock_gettime(compositor->presentation_clock, ts);
+	if (ret < 0) {
+		ts->tv_sec = 0;
+		ts->tv_nsec = 0;
+
+		if (!warned)
+			weston_log("Error: failure to read "
+				   "the presentation clock %#x: '%s' (%d)\n",
+				   compositor->presentation_clock,
+				   strerror(errno), errno);
+		warned = true;
+	}
+}
+
 static void
 controller_surface_screenshot(struct wl_client *client,
                               struct wl_resource *resource,
@@ -510,7 +547,7 @@ controller_surface_screenshot(struct wl_client *client,
     }
 
     // get current timestamp
-    weston_compositor_read_presentation_clock(compositor, &stamp);
+    ivi_weston_compositor_read_presentation_clock(compositor, &stamp);
     stamp_ms = stamp.tv_sec * 1000 + stamp.tv_nsec / 1000000;
 
     ivi_screenshot_send_done(screenshot, fd, width, height, stride, format,
@@ -851,6 +888,23 @@ calc_trans_matrix(struct weston_geometry *source_rect,
     weston_matrix_translate(m, translate_x, translate_y, 0.0f);
 }
 
+/**
+ * \param surface  The surface to be repainted
+ *
+ * Marks the output(s) that the surface is shown on as needing to be
+ * repainted.  See weston_output_schedule_repaint().
+ */
+
+static void
+ivi_weston_surface_schedule_repaint(struct weston_surface *surface)
+{
+	struct weston_output *output;
+
+	wl_list_for_each(output, &surface->compositor->output_list, link)
+		if (surface->output_mask & (1u << output->id))
+			weston_output_schedule_repaint(output);
+}
+
 void
 set_bkgnd_surface_prop(struct ivishell *shell)
 {
@@ -908,7 +962,7 @@ set_bkgnd_surface_prop(struct ivishell *shell)
     wl_list_insert(&view->geometry.transformation_list,
                    &shell->bkgnd_transform.link);
     weston_view_update_transform(view);
-    weston_surface_schedule_repaint(w_surface);
+    ivi_weston_surface_schedule_repaint(w_surface);
 }
 
 static void
@@ -1319,6 +1373,20 @@ screenshot_frame_listener_destroy(struct wl_resource *resource)
     free(l);
 }
 
+/**
+ * \ingroup output
+ */
+static void
+ivi_weston_output_damage(struct weston_output *output)
+{
+	struct weston_compositor *compositor = output->compositor;
+
+	pixman_region32_union(&compositor->primary_plane.damage,
+			      &compositor->primary_plane.damage,
+			      &output->region);
+	weston_output_schedule_repaint(output);
+}
+
 static void
 controller_screen_screenshot(struct wl_client *client,
                              struct wl_resource *resource,
@@ -1354,66 +1422,13 @@ controller_screen_screenshot(struct wl_client *client,
     l->output = iviscrn->output;
     wl_resource_set_implementation(l->screenshot, NULL, l,
                                    screenshot_frame_listener_destroy);
-    if (iviscrn->output->state < WESTON_OUTPUT_SLEEPING) {
-        switch (iviscrn->plane_state) {
-        case PLANES_ENABLED:
-            /* HW planes are not yet disabled for the output from ivi-controller */
-            if (iviscrn->output->disable_planes > 0) {
-                /* another module have disabled the HW planes for the output,
-                 * here the screenshot might not be reliable as we don't know if
-                 * GPU composition is enforced at the moment.
-                 */
-                iviscrn->plane_state = PLANES_DISABLED;
-            }
-            else {
-                /* disable the planes and schedule a repaint */
-                iviscrn->plane_state = PLANES_DISABLE_SCHEDULED;
-            }
-            break;
-        case PLANES_DISABLE_SCHEDULED:
-            /* disable of HW planes already scheduled from another client.
-             * we need to wait for new-frame signal as GPU composition is not
-             * yet enforced.
-             */
-            break;
-        case PLANES_DISABLED:
-            /* HW planes are already disabled, copy screen content. */
-            if (iviscrn->output->disable_planes == 0) {
-                /* earlier another module had disabled the planes for the output,
-                 * but now enabled and we are unaware.
-                 */
-                iviscrn->plane_state = PLANES_DISABLE_SCHEDULED;
-            }
-            break;
-        default:
-	    break;
-        }
-    }
-    else {
-        /* HW planes are already disabled as Weston output DPMS is off */
-        iviscrn->plane_state = PLANES_DISABLED;
-    }
 
-    if (iviscrn->plane_state == PLANES_DISABLE_SCHEDULED) {
-        l->output_destroyed.notify = screenshot_output_destroyed;
-        wl_signal_add(&iviscrn->output->destroy_signal, &l->output_destroyed);
-        l->frame_listener.notify = controller_screenshot_notify;
-        wl_signal_add(&iviscrn->output->frame_signal, &l->frame_listener);
-
-        iviscrn->output->disable_planes++;
-        weston_output_damage(iviscrn->output);
-    }
-    else if (iviscrn->plane_state == PLANES_DISABLED) {
-        wl_list_init(&l->frame_listener.link);
-        wl_list_init(&l->output_destroyed.link);
-
-        /* We are blindly decrementing the disable_planes flag in
-         * controller_take_screenshot(). Increment the flag so that
-         * commen logic could be reused for both cases.
-         */
-        iviscrn->output->disable_planes++;
-        controller_take_screenshot(l, iviscrn->output);
-    }
+    l->output_destroyed.notify = screenshot_output_destroyed;
+    wl_signal_add(&iviscrn->output->destroy_signal, &l->output_destroyed);
+    l->frame_listener.notify = controller_screenshot_notify;
+    wl_signal_add(&iviscrn->output->frame_signal, &l->frame_listener);
+    iviscrn->output->disable_planes++;
+    ivi_weston_output_damage(iviscrn->output);
 }
 
 static void
