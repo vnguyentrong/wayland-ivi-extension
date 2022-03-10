@@ -2427,26 +2427,6 @@ ilm_layerRemoveNotification(t_ilm_layer layer)
     return returnValue;
 }
 
-static struct surface_context *
-create_surface_context(struct wayland_context *ctx, uint32_t id_surface)
-{
-    struct surface_context *ctx_surf = NULL;
-
-    ctx_surf = calloc(1, sizeof *ctx_surf);
-    if (ctx_surf == NULL) {
-        fprintf(stderr, "Failed to allocate memory for surface_context\n");
-        return NULL;
-    }
-
-    ctx_surf->id_surface = id_surface;
-    ctx_surf->ctx = ctx;
-
-    wl_list_insert(&ctx->list_surface, &ctx_surf->link);
-    wl_list_init(&ctx_surf->list_accepted_seats);
-
-    return ctx_surf;
-}
-
 ILM_EXPORT ilmErrorTypes
 ilm_registerNotification(notificationFunc callback, void *user_data)
 {
@@ -2489,7 +2469,6 @@ ilm_surfaceAddNotification(t_ilm_surface surface,
     if (ctx_surf == NULL) {
         if (callback != NULL) {
             callback((uint32_t)surface, NULL, ILM_NOTIFICATION_CONTENT_REMOVED);
-            ctx_surf = create_surface_context(&ctx->wl, (uint32_t)surface);
         }
     }
     else {
