@@ -297,33 +297,31 @@ typedef void(*shutdownNotificationFunc)(t_ilm_shutdown_error_type error_type,
                                         void* user_data);
 
 /**
- * Typedef for notification callback on wayland output creation/deletion
+ * Typedef for notification callback on screenshot send done event
+ * @param user_data the use data, be passed when call the screenshot api
+ * @param fd fd for file containing image data, don't close it in callback,
+ * it will be closed and shouldn't be accessed any longer after the callback execution. 
+ * @param width image width in pixels
+ * @param height image height in pixels
+ * @param stride number of bytes per pixel row
+ * @param format image format of type wl_shm.format
+ * @param timestamp timestamp in milliseconds
  */
-typedef void(*screenNotificationFunc)(t_ilm_screen_notification_type status,
-                                      t_ilm_int id,
-                                      t_ilm_const_string name,
-                                      void* user_data);
+typedef ilmErrorTypes(*screenshotDoneNotificationFunc)(void *user_data,
+                                        t_ilm_int fd,
+                                        t_ilm_uint width,
+                                        t_ilm_uint height,
+                                        t_ilm_uint stride,
+                                        t_ilm_uint format,
+                                        t_ilm_uint timestamp);
 
 /**
- * Typedef for notification callback on input focus change.
- * Callback parameters:
- * surface_id : surface id on which the input device focus change happened.
- * device     : one of the touch, pointer and keyboard devices.
- * seatName   : seat to which the device is assigned to. This pointer
- *              is freed by ilm library after callback returns.
- * screen_id  : screen_id on which this focus change happened. This
- *              makes sense only for pointer and touch devices. For
- *              keyboard, this parameter is set to INVALID_ID which is 0xFFFFFFFF.
- * status     : set to true if focus is moved into the surface and false
- *              if focus is moved out of the surface
- * user_data  : This is the parameter passed to ilm_registerInputFocusNotification
- *             API.
+ * Typedef for notification callback on screenshot send error event
+ * @param user_data the use data, be passed when call the screenshot api
+ * @param error error code
+ * @param message error description
  */
-typedef void (*inputFocusNotificationFunc)(t_ilm_surface surface_id,
-                                           ilmInputDevice device,
-                                           t_ilm_string seat_name,
-                                           t_ilm_display screen_id,
-                                           t_ilm_bool status,
-                                           void* user_data);
-
+typedef void(*screenshotErrorNotificationFunc)(void *user_data,
+                                        t_ilm_uint error,
+                                        const char *message);
 #endif /* _ILM_TYPES_H_*/
