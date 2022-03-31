@@ -49,6 +49,11 @@ struct wayland_context {
 
     struct wl_shm *wl_shm;
     bool has_argb8888;
+
+    struct {
+        inputFocusNotificationFunc callback;
+        void *user_data;
+    } input_focus_notification;
 };
 
 struct ilm_control_context {
