@@ -1446,7 +1446,11 @@ control_thread(void *p_ret)
            { .fd = shutdown_fd, .events = POLLIN }
         };
 
-        int pollret = poll(pfd, 2, -1);
+        int pollret;
+        do {
+            pollret = poll(pfd, 2, -1);
+        } while (pollret == -1 && errno == EINTR);
+
         if (pollret != -1 && (pfd[0].revents & POLLIN))
         {
             wl_display_read_events(display);
