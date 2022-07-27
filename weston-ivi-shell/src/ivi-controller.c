@@ -1408,31 +1408,44 @@ controller_create_screen(struct wl_client *client,
 {
     struct weston_head *weston_head =
         wl_resource_get_user_data(output_resource);
+    struct weston_output *weston_output =
+        (weston_head != NULL ? weston_head->output : NULL);
     struct wl_resource *screen_resource;
     struct ivicontroller *ctrl = wl_resource_get_user_data(resource);
     struct iviscreen* iviscrn = NULL;
 
-
-    wl_list_for_each(iviscrn, &ctrl->shell->list_screen, link) {
-        if (weston_head->output != iviscrn->output) {
-            continue;
-        }
-
-        screen_resource = wl_resource_create(client, &ivi_wm_screen_interface, 1, id);
-        if (screen_resource == NULL) {
-            wl_resource_post_no_memory(resource);
-            return;
-        }
-
-        wl_resource_set_implementation(screen_resource,
-                                       &controller_screen_implementation,
-                                       iviscrn, destroy_ivicontroller_screen);
-
-        wl_list_insert(&iviscrn->resource_list, wl_resource_get_link(screen_resource));
-
-        ivi_wm_screen_send_screen_id(screen_resource, iviscrn->id_screen);
-        ivi_wm_screen_send_connector_name(screen_resource, iviscrn->output->name);
+    screen_resource = wl_resource_create(client, &ivi_wm_screen_interface, 1, id);
+    if (screen_resource == NULL) {
+        wl_resource_post_no_memory(resource);
+        return;
     }
+
+    wl_list_init(wl_resource_get_link(screen_resource));
+
+    if (weston_output) {
+        wl_list_for_each(iviscrn, &ctrl->shell->list_screen, link) {
+            if (weston_output == iviscrn->output)
+                break;
+        }
+
+        if (iviscrn && (weston_output != iviscrn->output))
+            iviscrn = NULL;
+    }
+
+    wl_resource_set_implementation(screen_resource,
+                                   &controller_screen_implementation,
+                                   iviscrn, destroy_ivicontroller_screen);
+
+    /* there is nothing more to set-up as the screen is already destroyed */
+    if (!iviscrn) {
+        weston_log("%s: the output is already destroyed\n", __func__);
+        return;
+    }
+
+    wl_list_insert(&iviscrn->resource_list, wl_resource_get_link(screen_resource));
+
+    ivi_wm_screen_send_screen_id(screen_resource, iviscrn->id_screen);
+    ivi_wm_screen_send_connector_name(screen_resource, iviscrn->output->name);
 }
 
 static const struct ivi_wm_interface controller_implementation = {
