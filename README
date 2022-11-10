@@ -46,17 +46,21 @@ Pre-requisite:
     export LD_LIBRARY_PATH=<your installation path>/lib 
 
 Start-up Weston:
+<<<<<<< HEAD
    Example: WESTON_MODULE_MAP="ivi-input-controller.so=<path to input controleler module lib file>;ivi-id-agent.so=<path to id agent module lib file" <your installation path>/bin/weston -Swayland-1
+=======
+   Example: <your installation path>/bin/weston -Swayland-1
+>>>>>>> 751f3b5 (README: weston isn't using the wayland-0)
 
 Start-up HMI helper:
-   Example: <your installation path>/bin/layer-add-surfaces 1000 1
+   Example: WAYLAND_DISPLAY=wayland-1 <your installation path>/bin/layer-add-surfaces 1000 1
 
 EGLWLMockNavigation:
-   Example: <your installation path>/bin/EGLWLMockNavigation
+   Example: WAYLAND_DISPLAY=wayland-1 <your installation path>/bin/EGLWLMockNavigation
 
 How to test
 ====================================
 1. Build the testsuite by setting BUILD_ILM_API_TESTS option.
    Example: cmake -DBUILD_ILM_API_TESTS
 2. After starting up Weston run the testsuite.
-   Example: <your installation path>/bin/ivi-layermanagement-api-test
+   Example: WAYLAND_DISPLAY=wayland-1 <your installation path>/bin/ivi-layermanagement-api-test
