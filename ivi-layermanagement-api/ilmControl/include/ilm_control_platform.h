@@ -46,6 +46,9 @@ struct wayland_context {
     ilmErrorTypes error_flag;
 
     struct ivi_input *input_controller;
+
+    struct wl_shm *wl_shm; // wl_shm global for create the shm_buffer
+    bool has_argb; // Render is supported ARGB32 or not
 };
 
 struct ilm_control_context {
