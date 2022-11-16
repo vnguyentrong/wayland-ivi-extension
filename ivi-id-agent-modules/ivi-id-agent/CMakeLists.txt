@@ -25,7 +25,11 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_SERVER wayland-server REQUIRED)
 pkg_check_modules(WESTON weston>=6.0.0 REQUIRED)
 pkg_check_modules(PIXMAN pixman-1 REQUIRED)
+<<<<<<< HEAD
 pkg_check_modules(LIBWESTON_DESKTOP libweston-desktop-6 REQUIRED)
+=======
+pkg_check_modules(LIBWESTON_DESKTOP libweston-12 REQUIRED)
+>>>>>>> b69628a (ivi-id-agent-modules: remove the libweston-desktop)
 
 find_package(Threads REQUIRED)
 
