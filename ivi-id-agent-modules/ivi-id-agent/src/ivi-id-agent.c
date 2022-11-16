@@ -26,15 +26,9 @@
 #include <limits.h>
 
 #include <weston.h>
-<<<<<<< HEAD
-#include <libweston-6/libweston-desktop.h>
-#include "config-parser.h"
-#include <weston/ivi-layout-export.h>
-=======
 #include <libweston/desktop.h>
 #include "libweston/config-parser.h"
 #include <ivi-layout-export.h>
->>>>>>> b69628a (ivi-id-agent-modules: remove the libweston-desktop)
 
 #ifndef INVALID_ID
 #define INVALID_ID 0xFFFFFFFF
