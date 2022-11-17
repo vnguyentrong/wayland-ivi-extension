@@ -70,6 +70,7 @@ struct ivishell {
     struct wl_listener surface_created;
     struct wl_listener surface_removed;
     struct wl_listener surface_configured;
+    struct wl_listener desktop_surface_configured;
 
     struct wl_listener layer_created;
     struct wl_listener layer_removed;
@@ -96,6 +97,9 @@ struct ivishell {
     struct wl_client *client;
     char *ivi_client_name;
     char *debug_scopes;
+
+    void (*set_surface_id)(void *data, struct ivi_layout_surface *layout_surface);
+    void *id_agent;
 };
 
 #endif /* WESTON_IVI_SHELL_SRC_IVI_CONTROLLER_H_ */

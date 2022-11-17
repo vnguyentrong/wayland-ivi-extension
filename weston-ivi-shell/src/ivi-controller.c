@@ -1511,10 +1511,15 @@ create_surface(struct ivishell *shell,
     if (shell->bkgnd_surface_id != (int32_t)id_surface) {
         wl_list_insert(&shell->list_surface, &ivisurf->link);
 
+        if((id_surface == IVI_INVALID_ID) && (shell->set_surface_id)){
+            shell->set_surface_id(shell->id_agent, layout_surface);
+            id_surface = lyt->get_id_of_surface(layout_surface);
+        }
+
         wl_list_for_each(controller, &shell->list_controller, link) {
             if (controller->resource)
                 ivi_wm_send_surface_created(controller->resource, id_surface);
-            }
+        }
 
         ivisurf->property_changed.notify = send_surface_prop;
         lyt->surface_add_listener(layout_surface, &ivisurf->property_changed);
@@ -1704,6 +1709,13 @@ surface_event_configure(struct wl_listener *listener, void *data)
     }
 }
 
+static void
+desktop_surface_event_configure(struct wl_listener *listener, void *data)
+{
+    struct ivishell *shell = wl_container_of(listener, shell, desktop_surface_configured);
+    surface_event_configure(&shell->surface_configured, data);
+}
+
 static int32_t
 check_layout_layers(struct ivishell *shell)
 {
@@ -1814,7 +1826,7 @@ get_config(struct weston_compositor *compositor, struct ivishell *shell)
 
 	weston_config_section_get_int(section,
                        "bkgnd-surface-id",
-                       &shell->bkgnd_surface_id, -1);
+                       &shell->bkgnd_surface_id, -2);
 
 	weston_config_section_get_string(section,
 	                   "debug-scopes",
@@ -1883,6 +1895,7 @@ ivi_shell_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&shell->output_resized.link);
 
 	wl_list_remove(&shell->surface_configured.link);
+    wl_list_remove(&shell->desktop_surface_configured.link);
 	wl_list_remove(&shell->surface_removed.link);
 	wl_list_remove(&shell->surface_created.link);
 
@@ -1946,10 +1959,12 @@ init_ivi_shell(struct weston_compositor *ec, struct ivishell *shell)
     shell->surface_created.notify = surface_event_create;
     shell->surface_removed.notify = surface_event_remove;
     shell->surface_configured.notify = surface_event_configure;
+    shell->desktop_surface_configured.notify = desktop_surface_event_configure;
 
     lyt->add_listener_create_surface(&shell->surface_created);
     lyt->add_listener_remove_surface(&shell->surface_removed);
     lyt->add_listener_configure_surface(&shell->surface_configured);
+    lyt->add_listener_configure_desktop_surface(&shell->desktop_surface_configured);
 
     shell->output_created.notify = output_created_event;
     shell->output_destroyed.notify = output_destroyed_event;
@@ -2053,8 +2068,7 @@ static int load_id_agent_module(struct ivishell *shell)
     struct weston_config_section *section;
     char *id_agent_module = NULL;
 
-    int (*id_agent_module_init)(struct weston_compositor *compositor,
-            const struct ivi_layout_interface *interface);
+    int (*id_agent_module_init)(struct ivishell *shell);
 
     section = weston_config_get_section(config, "ivi-shell", NULL, NULL);
 
@@ -2069,7 +2083,7 @@ static int load_id_agent_module(struct ivishell *shell)
     if (!id_agent_module_init)
         return -1;
 
-    if (id_agent_module_init(shell->compositor, shell->interface) != 0) {
+    if (id_agent_module_init(shell) != 0) {
         weston_log("ivi-controller: Initialization of id-agent module failed\n");
         return -1;
     }
