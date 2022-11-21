@@ -73,6 +73,7 @@ struct input_context {
     struct wl_listener surface_destroyed;
     struct wl_listener compositor_destroy_listener;
     struct wl_listener seat_create_listener;
+    char* seat_default;
 };
 
 enum kbd_events {
@@ -978,14 +979,15 @@ handle_seat_create(struct wl_listener *listener, void *data)
                                     get_seat_capabilities(seat));
     }
 
-    /* If default seat is created, we have to add it to the accepted_seat_list
+    /* Assuming the first seat is the default seat, we have to add it to the accepted_seat_list
      * of all surfaces. Also we have to send an acceptance event to all clients */
-    if (!strcmp(ctx->west_seat->seat_name, "default")) {
+    if (!input_ctx->seat_default) {
+        input_ctx->seat_default = strdup(ctx->west_seat->seat_name);
         wl_list_for_each(surf, &input_ctx->ivishell->list_surface, link) {
             add_accepted_seat(surf, ctx);
             send_input_acceptance(input_ctx,
                                  interface->get_id_of_surface(surf->layout_surface),
-                                 "default", ILM_TRUE);
+                                 input_ctx->seat_default, ILM_TRUE);
         }
     }
 }
@@ -1032,12 +1034,15 @@ handle_surface_create(struct wl_listener *listener, void *data)
 
     wl_list_init(&ivisurface->accepted_seat_list);
 
-    seat_ctx = input_ctrl_get_seat_ctx(input_ctx, "default");
-    if (seat_ctx) {
-        add_accepted_seat(ivisurface, seat_ctx);
-        send_input_acceptance(input_ctx,
-                              interface->get_id_of_surface(ivisurface->layout_surface),
-                              "default", ILM_TRUE);
+    if(input_ctx->seat_default)
+    {
+        seat_ctx = input_ctrl_get_seat_ctx(input_ctx, input_ctx->seat_default);
+        if (seat_ctx) {
+            add_accepted_seat(ivisurface, seat_ctx);
+            send_input_acceptance(input_ctx,
+                                interface->get_id_of_surface(ivisurface->layout_surface),
+                                input_ctx->seat_default, ILM_TRUE);
+        }
     }
 }
 
@@ -1246,6 +1251,11 @@ destroy_input_context(struct input_context *ctx)
          * free up the controller structure*/
         wl_resource_destroy(resource);
     }
+
+    if(ctx->seat_default)
+    {
+        free(ctx->seat_default);
+    }
     free(ctx);
 }
 
@@ -1301,6 +1311,7 @@ create_input_context(struct ivishell *shell)
     }
 
     ctx->ivishell = shell;
+    ctx->seat_default = NULL;
     wl_list_init(&ctx->resource_list);
     wl_list_init(&ctx->seat_list);
 
