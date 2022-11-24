@@ -26,9 +26,10 @@
 #include <limits.h>
 
 #include <weston.h>
-#include <libweston-6/libweston-desktop.h>
-#include "config-parser.h"
-#include <weston/ivi-layout-export.h>
+#include <libweston/desktop.h>
+#include "libweston/config-parser.h"
+#include <ivi-layout-export.h>
+#include "ivi-controller.h"
 
 #ifndef INVALID_ID
 #define INVALID_ID 0xFFFFFFFF
@@ -51,8 +52,8 @@ struct ivi_id_agent
     struct wl_list app_list;
     struct weston_compositor *compositor;
     const struct ivi_layout_interface *interface;
+    struct ivishell *ivishell;
 
-    struct wl_listener desktop_surface_configured;
     struct wl_listener destroy_listener;
     struct wl_listener surface_removed;
 };
@@ -170,14 +171,9 @@ ivi_failed:
 }
 
 static void
-desktop_surface_event_configure(struct wl_listener *listener,
-        void *data)
+set_surface_id(void *data, struct ivi_layout_surface *layout_surface)
 {
-    struct ivi_id_agent *ida = wl_container_of(listener, ida,
-            desktop_surface_configured);
-
-    struct ivi_layout_surface *layout_surface =
-            (struct ivi_layout_surface *) data;
+    struct ivi_id_agent *ida = data;
 
     if (get_id(ida, layout_surface) == IVI_FAILED)
         weston_log("ivi-id-agent: Could not create surface_id for application\n");
@@ -327,10 +323,14 @@ ivi_failed:
 }
 
 WL_EXPORT int32_t
-id_agent_module_init(struct weston_compositor *compositor,
-        const struct ivi_layout_interface *interface)
+id_agent_module_init(struct ivishell *shell)
 {
     struct ivi_id_agent *ida = NULL;
+
+    if (shell == NULL || shell->interface == NULL || shell->compositor == NULL){
+        printf("wrong ivishell input\n");
+        goto ivi_failed;
+    }
 
     ida = calloc(1, sizeof *ida);
     if (ida == NULL) {
@@ -338,16 +338,15 @@ id_agent_module_init(struct weston_compositor *compositor,
         goto ivi_failed;
     }
 
-    ida->compositor = compositor;
-    ida->interface = interface;
-    ida->desktop_surface_configured.notify = desktop_surface_event_configure;
+    ida->compositor = shell->compositor;
+    ida->interface = shell->interface;
+    ida->ivishell = shell;
+    
     ida->destroy_listener.notify = id_agent_module_deinit;
     ida->surface_removed.notify = surface_event_remove;
 
-    wl_signal_add(&compositor->destroy_signal, &ida->destroy_listener);
-    ida->interface->add_listener_configure_desktop_surface(
-            &ida->desktop_surface_configured);
-    interface->add_listener_remove_surface(&ida->surface_removed);
+    wl_signal_add(&ida->compositor->destroy_signal, &ida->destroy_listener);
+    ida->interface->add_listener_remove_surface(&ida->surface_removed);
 
     wl_list_init(&ida->app_list);
     if(read_config(ida) != 0) {
@@ -355,6 +354,9 @@ id_agent_module_init(struct weston_compositor *compositor,
         deinit(ida);
         goto ivi_failed;
     }
+
+    shell->set_surface_id = set_surface_id;
+    shell->id_agent = ida;
 
     return IVI_SUCCEEDED;
 
@@ -372,7 +374,6 @@ deinit(struct ivi_id_agent *ida)
         free(db_elem);
     }
 
-    wl_list_remove(&ida->desktop_surface_configured.link);
     wl_list_remove(&ida->destroy_listener.link);
     wl_list_remove(&ida->surface_removed.link);
     free(ida);

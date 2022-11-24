@@ -63,6 +63,7 @@
         An ivi_screenshot object is created which will receive the screenshot
         data of the specified output.
      </description>
+     <arg name="buffer" type="object" interface="wl_buffer"/>
      <arg name="screenshot" type="new_id" interface="ivi_screenshot"/>
     </request>
 
@@ -121,29 +122,26 @@
 
     <event name="done">
       <description summary="screenshot finished">
-        This event contains a filedescriptor for a file with raw image data.
-        Furthermore size, stride, format and timestamp of screenshot are
-        provided.
+        This event notify the buffer had filled the screenshot data.
+        it attaches the format and timestamp information.
       </description>
-      <arg name="fd" type="fd" summary="fd for file containing image data"/>
-      <arg name="width" type="int" summary="image width in pixels"/>
-      <arg name="height" type="int" summary="image height in pixels"/>
-      <arg name="stride" type="int" summary="number of bytes per pixel row"/>
       <arg name="format" type="uint" summary="image format of type wl_shm.format"/>
       <arg name="timestamp" type="uint" summary="timestamp in milliseconds"/>
     </event>
 
     <enum name="error">
-      <entry name="io_error" value="0"
-             summary="screenshot file could not be created"/>
-      <entry name="not_supported" value="1"
-             summary="screenshot can not be read"/>
-      <entry name="no_output" value="2"
-             summary="output has been destroyed"/>
-      <entry name="no_surface" value="3"
-             summary="surface has been destroyed"/>
-      <entry name="no_content" value="4"
-             summary="surface has no content"/>
+      <entry name="no_memory" value="0"
+             summary="internal allocate failed"/>
+      <entry name="surface_dump" value="1"
+             summary="surface_dump got a failure"/>
+      <entry name="bad_buffer" value="2"
+             summary="bad input buffer"/>
+      <entry name="no_output" value="3"
+             summary="wrong output to capture"/>
+      <entry name="no_surface" value="4"
+             summary="wrong surface to capture"/>
+      <entry name="no_content" value="5"
+             summary="surface no content"/>
     </enum>
 
     <event name="error">
@@ -151,7 +149,6 @@
         The error event is sent when the screenshot could not be created.
       </description>
       <arg name="error" type="uint" enum="error" summary="error code"/>
-      <arg name="message" type="string" summary="error description"/>
     </event>
   </interface>
 
@@ -342,6 +339,7 @@
         is no surface with such name the server will respond with an
         ivi_screenshot.error event.
       </description>
+      <arg name="buffer" type="object" interface="wl_buffer"/>
       <arg name="screenshot" type="new_id" interface="ivi_screenshot"/>
       <arg name="surface_id" type="uint"/>
     </request>

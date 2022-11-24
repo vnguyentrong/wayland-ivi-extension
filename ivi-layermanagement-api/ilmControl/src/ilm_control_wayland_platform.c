@@ -67,9 +67,18 @@ struct screen_context {
     struct wayland_context *ctx;
 };
 
+struct ivi_buffer{
+    struct wl_buffer *wl_buffer;
+    int32_t width;
+    int32_t height;
+    size_t size;
+    void *data;
+};
+
 struct screenshot_context {
     const char *filename;
     ilmErrorTypes result;
+    struct ivi_buffer *ivi_buffer;
 };
 
 static inline void lock_context(struct ilm_control_context *ctx)
@@ -893,6 +902,18 @@ static struct ivi_input_listener input_listener = {
 };
 
 static void
+shm_format(void *data, struct wl_shm *wl_shm, uint32_t format)
+{
+    struct wayland_context *ctx = data;
+    if (format == WL_SHM_FORMAT_ARGB8888)
+        ctx->has_argb = true;
+}
+
+struct wl_shm_listener shm_listener = {
+    shm_format
+};
+
+static void
 registry_handle_control(void *data,
                        struct wl_registry *registry,
                        uint32_t name, const char *interface,
@@ -953,6 +974,11 @@ registry_handle_control(void *data,
         ctx_scrn->ctx = ctx;
         ctx_scrn->name = name;
         wl_list_insert(&ctx->list_screen, &ctx_scrn->link);
+
+    } else if (strcmp(interface, "wl_shm") == 0) {
+        ctx->wl_shm = wl_registry_bind(registry, name, 
+                                    &wl_shm_interface, version);
+        wl_shm_add_listener(ctx->wl_shm, &shm_listener, ctx);
     }
 }
 
@@ -1057,6 +1083,11 @@ static void destroy_control_resources(void)
         wl_display_flush(ctx->wl.display);
     }
 
+    if (ctx->wl.wl_shm){
+        wl_shm_destroy(ctx->wl.wl_shm);
+        ctx->wl.wl_shm = NULL;
+    }
+
     if (ctx->wl.registry) {
         wl_registry_destroy(ctx->wl.registry);
         ctx->wl.registry = NULL;
@@ -1071,6 +1102,7 @@ static void destroy_control_resources(void)
         ivi_input_destroy(ctx->wl.input_controller);
         ctx->wl.input_controller = NULL;
     }
+
 
     if (0 != pthread_mutex_destroy(&ctx->mutex)) {
         fprintf(stderr, "failed to destroy pthread_mutex\n");
@@ -1290,6 +1322,9 @@ init_control(void)
     struct wayland_context *wl = &ctx->wl;
     struct screen_context *ctx_scrn;
     int ret = 0;
+
+    wl->has_argb = false;
+    wl->wl_shm = NULL;
 
     wl->queue = wl_display_create_queue(wl->display);
     if (! wl->queue) {
@@ -2113,37 +2148,123 @@ ilm_displaySetRenderOrder(t_ilm_display display,
     return returnValue;
 }
 
-static void screenshot_done(void *data, struct ivi_screenshot *ivi_screenshot,
-                            int32_t fd, int32_t width, int32_t height,
-                            int32_t stride, uint32_t format, uint32_t timestamp)
+static int
+create_screenshot_file(size_t size)
+{
+    const char template[] = "/ivi-shell-screenshot-XXXXXX";
+    const char *runtimedir;
+    char *tmpname;
+    int fd;
+
+    runtimedir = getenv("XDG_RUNTIME_DIR");
+    if (runtimedir == NULL)
+        return -1;
+
+    tmpname = malloc(strlen(runtimedir) + sizeof(template));
+    if (tmpname == NULL)
+        return -1;
+
+    fd = mkstemp(strcat(strcpy(tmpname, runtimedir), template));
+
+    if (fd < 0) {
+    	free(tmpname);
+        return -1;
+    }
+
+    unlink(tmpname);
+    free(tmpname);
+
+#ifdef HAVE_POSIX_FALLOCATE
+    if (posix_fallocate(fd, 0, size)) {
+#else
+    if (ftruncate(fd, size) < 0) {
+#endif
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static struct ivi_buffer *
+create_shm_buffer(int width, int height)
+{
+    struct ilm_control_context *const ctx = &ilm_context;
+    struct ivi_buffer *ivi_buffer = NULL;
+    struct wl_shm_pool *pool = NULL;
+    int fd = -1;
+    const size_t bytes_pp = 4U; // bytes per pixel of ARGB32 is 4
+
+    // Check wl_shm global and argb32 is supported
+    if((!ctx->wl.has_argb) || (!ctx->wl.wl_shm)){
+        printf("no wl_shm resource or renderer don't support argb8888\n");
+        return NULL;
+    }
+    // width and heigth must be bigger than 0
+    if((width <= 0) || (height <= 0)){
+        printf("create_shm_buffer: wrong input\n");
+        return NULL;
+    }
+    // allocate memory for ivi_buffer
+    ivi_buffer = malloc(sizeof(struct ivi_buffer));
+    if(ivi_buffer == NULL)
+    {
+        printf("create_shm_buffer: no memory\n");
+        return NULL;
+    }
+    // setup the ivi_buffer properties
+    ivi_buffer->width = width;
+    ivi_buffer->height = height;
+    ivi_buffer->size = (ivi_buffer->width * bytes_pp) * ivi_buffer->height;
+    // create the screenshot file (shm file)
+    fd = create_screenshot_file(ivi_buffer->size);
+    if(fd < 0){
+        printf("create_shm_buffer: can't create the screenshot file\n");
+        free(ivi_buffer);
+        return NULL;
+    }
+    // get the shm buffer data pointer via mmap
+    ivi_buffer->data = mmap(NULL, ivi_buffer->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ivi_buffer->data == MAP_FAILED) {
+        printf("create_shm_buffer: mmap got a failure\n");
+        free(ivi_buffer);
+        close(fd);
+        return NULL;
+    }
+    // Create the shm_buffer with format ARGB32
+    pool = wl_shm_create_pool(ctx->wl.wl_shm, fd, ivi_buffer->size);
+    ivi_buffer->wl_buffer = wl_shm_pool_create_buffer(pool, 0, ivi_buffer->width, ivi_buffer->height,
+                           ivi_buffer->width * bytes_pp, WL_SHM_FORMAT_ARGB8888);
+    wl_shm_pool_destroy(pool);
+    close(fd);
+    return ivi_buffer;
+}
+
+static void
+destroy_shm_buffer(struct ivi_buffer *ivi_buffer)
+{
+    // destroy the ivi_buffer resource
+    wl_buffer_destroy(ivi_buffer->wl_buffer);
+    munmap(ivi_buffer->data, ivi_buffer->size);
+    free(ivi_buffer);
+}
+
+static void
+screenshot_done(void *data, struct ivi_screenshot *ivi_screenshot,
+                    uint32_t format, uint32_t timestamp)
 {
     struct screenshot_context *ctx_scrshot = data;
-    char *buffer;
-    size_t size = stride * height;
     const char *filename = ctx_scrshot->filename;
     char *filename_ext = NULL;
-
+    // break the waitting in main thread
     ctx_scrshot->filename = NULL;
+    // destroy the ivi_screenshot proxy
     ivi_screenshot_destroy(ivi_screenshot);
-
-    if (filename == NULL) {
-        ctx_scrshot->result = ILM_FAILED;
-        fprintf(stderr, "screenshot file name not provided: %m\n");
-        return;
-    }
-
-    buffer = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-    close(fd);
-
-    if (buffer == MAP_FAILED) {
-        ctx_scrshot->result = ILM_FAILED;
-        fprintf(stderr, "failed to mmap screenshot file: %m\n");
-        return;
-    }
-
+    // save image as the png format
     if ((filename_ext = strstr(filename, ".png")) && (strlen(filename_ext) == 4)) {
-        if (save_as_png(filename, (const char *)buffer,
-                        width, height, format) == 0) {
+        if (save_as_png(filename, (const char *)ctx_scrshot->ivi_buffer->data,
+                        ctx_scrshot->ivi_buffer->width,
+                        ctx_scrshot->ivi_buffer->height,
+                        format) == 0) {
             ctx_scrshot->result = ILM_SUCCESS;
         } else {
             ctx_scrshot->result = ILM_FAILED;
@@ -2153,26 +2274,55 @@ static void screenshot_done(void *data, struct ivi_screenshot *ivi_screenshot,
         if (!((filename_ext = strstr(filename, ".bmp")) && (strlen(filename_ext) == 4))) {
             fprintf(stderr, "trying to write screenshot as bmp file, although file extension does not match: %m\n");
         }
-
-        if (save_as_bitmap(filename, (const char *)buffer,
-                           width, height, format) == 0) {
+        // save image as the bmp format
+        if (save_as_bitmap(filename, (const char *)ctx_scrshot->ivi_buffer->data,
+                        ctx_scrshot->ivi_buffer->width,
+                        ctx_scrshot->ivi_buffer->height,
+                        format) == 0) {
             ctx_scrshot->result = ILM_SUCCESS;
         } else {
             ctx_scrshot->result = ILM_FAILED;
             fprintf(stderr, "failed to write screenshot as bmp file: %m\n");
         }
     }
-
-    munmap(buffer, size);
+    //destroy the ivi_buffer resource
+    destroy_shm_buffer(ctx_scrshot->ivi_buffer);
 }
 
-static void screenshot_error(void *data, struct ivi_screenshot *ivi_screenshot,
-                             uint32_t error, const char *message)
+static const char *
+screenshot_get_error_message(uint32_t error)
+{
+    switch (error)
+    {
+    case IVI_SCREENSHOT_ERROR_NO_MEMORY:
+        return "internal allocate failed";
+    case IVI_SCREENSHOT_ERROR_SURFACE_DUMP:
+        return "surface_dump got a failure";
+    case IVI_SCREENSHOT_ERROR_BAD_BUFFER:
+        return "bad input buffer";
+    case IVI_SCREENSHOT_ERROR_NO_OUTPUT:
+        return "wrong output to capture";
+    case IVI_SCREENSHOT_ERROR_NO_SURFACE:
+        return "wrong surface to capture";
+    case IVI_SCREENSHOT_ERROR_NO_CONTENT:
+        return "surface no content";
+    default:
+        return "unknown error";
+    }
+}
+
+static void
+screenshot_error(void *data, struct ivi_screenshot *ivi_screenshot, uint32_t error)
 {
     struct screenshot_context *ctx_scrshot = data;
+    // break the waitting in main thread
     ctx_scrshot->filename = NULL;
+    // destroy the ivi_screenshot proxy
     ivi_screenshot_destroy(ivi_screenshot);
-    fprintf(stderr, "screenshot failed, error 0x%x: %s\n", error, message);
+    // show the error message
+    fprintf(stderr, "screenshot failed, error 0x%x: %s\n", error, screenshot_get_error_message(error));
+    //destroy the ivi_buffer resource
+    destroy_shm_buffer(ctx_scrshot->ivi_buffer);
 }
 
 static struct ivi_screenshot_listener screenshot_listener = {
@@ -2187,20 +2337,35 @@ ilm_takeScreenshot(t_ilm_uint screen, t_ilm_const_string filename)
     struct ilm_control_context *const ctx = &ilm_context;
     struct screen_context *ctx_scrn = NULL;
 
+    // don't accept the empty file name
+    if(!filename){
+        printf("ilm_takeScreenshot: filename is empty\n");
+        return returnValue;
+    }
     lock_context(ctx);
+    // screen must exist before take a capture
     ctx_scrn = get_screen_context_by_id(&ctx->wl, (uint32_t)screen);
     if (ctx_scrn != NULL) {
         struct screenshot_context ctx_scrshot = {
             .filename = filename,
             .result = ILM_FAILED,
+            .ivi_buffer = NULL,
         };
-
+        // create the ivi_buffer, it will send to server to fill the capture data
+        ctx_scrshot.ivi_buffer = create_shm_buffer(ctx_scrn->prop.screenWidth, ctx_scrn->prop.screenHeight);
+        if(ctx_scrshot.ivi_buffer == NULL)
+        {
+            printf("create_shm_buffer got a failure\n");
+            return ILM_FAILED;
+        }
+        // send the screen shot request to server
         struct ivi_screenshot *scrshot =
-            ivi_wm_screen_screenshot(ctx_scrn->controller);
+            ivi_wm_screen_screenshot(ctx_scrn->controller, ctx_scrshot.ivi_buffer->wl_buffer);
         if (scrshot) {
             ivi_screenshot_add_listener(scrshot, &screenshot_listener,
                                         &ctx_scrshot);
             // dispatch until filename has been reset in done or error callback
+            // @TODO need to switch to other notification type
             int ret;
             do {
                 ret =
@@ -2208,6 +2373,9 @@ ilm_takeScreenshot(t_ilm_uint screen, t_ilm_const_string filename)
             } while ((ret != -1) && ctx_scrshot.filename);
 
             returnValue = ctx_scrshot.result;
+        }
+        else{
+            destroy_shm_buffer(ctx_scrshot.ivi_buffer);
         }
     }
     unlock_context(ctx);
@@ -2221,20 +2389,45 @@ ilm_takeSurfaceScreenshot(t_ilm_const_string filename,
 {
     ilmErrorTypes returnValue = ILM_FAILED;
     struct ilm_control_context *const ctx = &ilm_context;
+    struct surface_context *surfCtx = NULL;
 
+    // don't accept the empty file name
+    if(!filename){
+        printf("ilm_takeScreenshot: filename is empty\n");
+        return returnValue;
+    }
     lock_context(ctx);
+    //ivi_wm must bind before take a capture
     if (ctx->wl.controller) {
-          struct screenshot_context ctx_scrshot = {
+        struct screenshot_context ctx_scrshot = {
             .filename = filename,
             .result = ILM_FAILED,
+            .ivi_buffer = NULL,
         };
-
+        // get the surface properties before create the shm buffer
+        ivi_wm_surface_get(ctx->wl.controller, surfaceid, IVI_WM_PARAM_SIZE);
+        int ret = wl_display_roundtrip_queue(ctx->wl.display, ctx->wl.queue);
+        surfCtx = get_surface_context(&ctx->wl, (uint32_t)surfaceid);
+        // check the surface properties and surface id are existed
+        if(!surfCtx || ret == -1){
+            printf("ilm_takeSurfaceScreenshot: wrong surface id or can't get surface properties\n");
+            return ILM_FAILED;
+        }
+        // create the ivi_buffer, it will send to server to fill the capture data
+        ctx_scrshot.ivi_buffer = create_shm_buffer(surfCtx->prop.origSourceWidth, surfCtx->prop.origSourceHeight);
+        if(ctx_scrshot.ivi_buffer == NULL)
+        {
+            printf("create_shm_buffer got a failure\n");
+            return ILM_FAILED;
+        }
+        // send the surface screenshot request to server
         struct ivi_screenshot *scrshot =
-            ivi_wm_surface_screenshot(ctx->wl.controller, surfaceid);
+            ivi_wm_surface_screenshot(ctx->wl.controller, ctx_scrshot.ivi_buffer->wl_buffer, surfaceid);
         if (scrshot) {
             ivi_screenshot_add_listener(scrshot, &screenshot_listener,
                                         &ctx_scrshot);
             // dispatch until filename has been reset in done or error callback
+            // @TODO need to switch to other notification type
             int ret;
             do {
                 ret =
@@ -2242,6 +2435,9 @@ ilm_takeSurfaceScreenshot(t_ilm_const_string filename,
             } while ((ret != -1) && ctx_scrshot.filename);
 
             returnValue = ctx_scrshot.result;
+        }
+        else{
+            destroy_shm_buffer(ctx_scrshot.ivi_buffer);
         }
     }
     unlock_context(ctx);
