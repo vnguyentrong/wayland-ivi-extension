@@ -82,9 +82,10 @@ struct ivicontroller {
     struct wl_list surface_notifications;
 };
 
-struct ivi_screenshooter {
+struct screenshot_frame_listener {
+    struct wl_listener frame_listener;
+    struct wl_listener output_destroyed;
     struct wl_resource *screenshot;
-    struct weston_output *output;
 };
 
 struct screen_id_info {
@@ -397,27 +398,70 @@ controller_set_surface_visibility(struct wl_client *client,
     lyt->surface_set_visibility(layout_surface, visibility);
 }
 
+static int
+create_screenshot_file(off_t size) {
+    const char template[] = "/ivi-shell-screenshot-XXXXXX";
+    const char *runtimedir;
+    char *tmpname;
+    int fd;
+
+    runtimedir = getenv("XDG_RUNTIME_DIR");
+    if (runtimedir == NULL)
+        return -1;
+
+    tmpname = malloc(strlen(runtimedir) + sizeof(template));
+    if (tmpname == NULL)
+        return -1;
+
+    fd = mkstemp(strcat(strcpy(tmpname, runtimedir), template));
+
+    if (fd < 0) {
+    	free(tmpname);
+        return -1;
+    }
+
+    unlink(tmpname);
+    free(tmpname);
+
+#ifdef HAVE_POSIX_FALLOCATE
+    if (posix_fallocate(fd, 0, size)) {
+#else
+    if (ftruncate(fd, size) < 0) {
+#endif
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
 static void
 controller_surface_screenshot(struct wl_client *client,
                               struct wl_resource *resource,
-                              struct wl_resource *buffer_resource,
                               uint32_t screenshot_id,
                               uint32_t surface_id)
 {
     int32_t result = IVI_FAILED;
     struct ivicontroller *ctrl = wl_resource_get_user_data(resource);
     struct weston_surface *weston_surface = NULL;
-    int32_t width = 0, height = 0, stride = 0, size = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t stride = 0;
+    int32_t size = 0;
     const struct ivi_layout_interface *lyt = ctrl->shell->interface;
     struct ivi_layout_surface *layout_surface;
+    char *buffer = NULL;
     struct weston_compositor *compositor = ctrl->shell->compositor;
+    // assuming ABGR32 is always written by surface_dump
+    uint32_t format = WL_SHM_FORMAT_ABGR8888;
     struct wl_resource *screenshot;
     struct timespec stamp;
     uint32_t stamp_ms;
-    void *shm_buff_data = NULL;
-    struct weston_buffer *weston_buffer = NULL;
+    int fd;
 
-    screenshot = wl_resource_create(client, &ivi_screenshot_interface, 1, screenshot_id);
+    screenshot =
+        wl_resource_create(client, &ivi_screenshot_interface, 1, screenshot_id);
+
     if (screenshot == NULL) {
         wl_client_post_no_memory(client);
         return;
@@ -425,47 +469,69 @@ controller_surface_screenshot(struct wl_client *client,
 
     layout_surface = lyt->get_surface_from_id(surface_id);
     if (!layout_surface) {
-        ivi_screenshot_send_error(screenshot, IVI_SCREENSHOT_ERROR_NO_SURFACE);
+        ivi_screenshot_send_error(
+            screenshot, IVI_SCREENSHOT_ERROR_NO_SURFACE,
+            "surface_screenshot: the surface with given id does not exist");
         goto err;
     }
 
-    result = lyt->surface_get_size(layout_surface, &width, &height, &stride);
+    result = lyt->surface_get_size(layout_surface, &width,
+                                   &height, &stride);
     if ((result != IVI_SUCCEEDED) || !width || !height || !stride) {
-        ivi_screenshot_send_error(screenshot, IVI_SCREENSHOT_ERROR_NO_CONTENT);
+        ivi_screenshot_send_error(
+            screenshot, IVI_SCREENSHOT_ERROR_NO_CONTENT,
+            "surface_screenshot: surface does not have content");
         goto err;
     }
-    // get the weston buffer from buffer resource
-    weston_buffer = weston_buffer_from_resource(compositor, buffer_resource);
-    if (weston_buffer == NULL) {
-        ivi_screenshot_send_error(screenshot, IVI_SCREENSHOT_ERROR_NO_MEMORY);
-        goto err;
-    }
-    // Check weston buffer properties
-    if (weston_buffer->type != WESTON_BUFFER_SHM ||
-        wl_shm_buffer_get_width(weston_buffer->shm_buffer) < width ||
-        wl_shm_buffer_get_height(weston_buffer->shm_buffer) < height) {
-        ivi_screenshot_send_error(screenshot, WESTON_SCREENSHOOTER_BAD_BUFFER);
-        goto err;
-    }
-    // get the shm buff data pointer
-    shm_buff_data = wl_shm_buffer_get_data(weston_buffer->shm_buffer);
-    // surface dump the data to shm buffer
+
     size = stride * height;
-    weston_surface = lyt->surface_get_weston_surface(layout_surface);
-    result = lyt->surface_dump(weston_surface, shm_buff_data, size, 0, 0, width, height);
-    if (result != IVI_SUCCEEDED) {
-        ivi_screenshot_send_error(screenshot, IVI_SCREENSHOT_ERROR_SURFACE_DUMP);
+
+    fd = create_screenshot_file(size);
+    if (fd < 0) {
+        weston_log(
+            "surface_screenshot: failed to create file of %d bytes: %m\n",
+            size);
+        ivi_screenshot_send_error(
+            screenshot, IVI_SCREENSHOT_ERROR_IO_ERROR,
+            "failed to create screenshot file");
         goto err;
     }
+
+    buffer = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (buffer == MAP_FAILED) {
+        weston_log("surface_screenshot: failed to mmap %d bytes: %m\n", size);
+        ivi_screenshot_send_error(screenshot, IVI_SCREENSHOT_ERROR_IO_ERROR,
+                                  "failed to create screenshot");
+        goto err_mmap;
+    }
+
+    weston_surface = lyt->surface_get_weston_surface(layout_surface);
+
+    result = lyt->surface_dump(weston_surface, buffer, size, 0, 0,
+                               width, height);
+
+    if (result != IVI_SUCCEEDED) {
+        ivi_screenshot_send_error(
+            resource, IVI_SCREENSHOT_ERROR_NOT_SUPPORTED,
+            "surface_screenshot: surface dumping is not supported by renderer");
+        goto err_readpix;
+    }
+
     // get current timestamp
     weston_compositor_read_presentation_clock(compositor, &stamp);
     stamp_ms = stamp.tv_sec * 1000 + stamp.tv_nsec / 1000000;
-    // assuming ABGR32 is always written by surface_dump
-    ivi_screenshot_send_done(screenshot, WL_SHM_FORMAT_ABGR8888, stamp_ms);
 
+    ivi_screenshot_send_done(screenshot, fd, width, height, stride, format,
+                             stamp_ms);
+
+err_readpix:
+    munmap(buffer, size);
+err_mmap:
+    close(fd);
 err:
     wl_resource_destroy(screenshot);
 }
+
 
 static void
 send_surface_stats(struct ivicontroller *ctrl,
@@ -1119,74 +1185,165 @@ controller_screen_remove_layer(struct wl_client *client,
 }
 
 static void
-controller_screenshooter_done(void *data, enum weston_screenshooter_outcome outcome)
-{
-    struct ivi_screenshooter *screenshooter = data;
-
-    switch (outcome) {
-    case WESTON_SCREENSHOOTER_SUCCESS:
-        // assuming ARGB32 is always written by weston_screenshooter_shoot
-        ivi_screenshot_send_done(screenshooter->screenshot, WL_SHM_FORMAT_ARGB8888, timespec_to_msec(&screenshooter->output->frame_time));
-        break;
-    case WESTON_SCREENSHOOTER_NO_MEMORY:
-        ivi_screenshot_send_error(screenshooter->screenshot, IVI_SCREENSHOT_ERROR_NO_MEMORY);
-        break;
-    case WESTON_SCREENSHOOTER_BAD_BUFFER:
-        ivi_screenshot_send_error(screenshooter->screenshot, IVI_SCREENSHOT_ERROR_BAD_BUFFER);
-        break;
-    default:
-        break;
+flip_y(int32_t stride, int32_t height, uint32_t *data) {
+    int i, y, p, q;
+    // assuming stride aligned to 4 bytes
+    int pitch = stride / sizeof(*data);
+    for (y = 0; y < height / 2; ++y) {
+        p = y * pitch;
+        q = (height - y - 1) * pitch;
+        for (i = 0; i < pitch; ++i) {
+            uint32_t tmp = data[p + i];
+            data[p + i] = data[q + i];
+            data[q + i] = tmp;
+        }
     }
 }
 
 static void
-controller_screenshoot_destroy(struct wl_resource *resource)
+controller_screenshot_notify(struct wl_listener *listener, void *data)
 {
-    struct ivi_screenshooter *screenshooter = wl_resource_get_user_data(resource);
-    free(screenshooter);
+    struct screenshot_frame_listener *l =
+        wl_container_of(listener, l, frame_listener);
+
+    struct weston_output *output = data;
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t stride = 0;
+    uint32_t *readpixs = NULL;
+    uint32_t shm_format;
+    int fd;
+    size_t size;
+    pixman_format_code_t format = output->compositor->read_format;
+
+    --output->disable_planes;
+
+    // map to shm buffer format
+    switch (format) {
+    case PIXMAN_a8r8g8b8:
+        shm_format = WL_SHM_FORMAT_ARGB8888;
+        break;
+    case PIXMAN_x8r8g8b8:
+        shm_format = WL_SHM_FORMAT_XRGB8888;
+        break;
+    case PIXMAN_a8b8g8r8:
+        shm_format = WL_SHM_FORMAT_ABGR8888;
+        break;
+    case PIXMAN_x8b8g8r8:
+        shm_format = WL_SHM_FORMAT_XBGR8888;
+        break;
+    default:
+        ivi_screenshot_send_error(l->screenshot,
+                                  IVI_SCREENSHOT_ERROR_NOT_SUPPORTED,
+                                  "unsupported pixel format");
+        goto err_fd;
+    }
+
+    width = output->current_mode->width;
+    height = output->current_mode->height;
+    stride = width * (PIXMAN_FORMAT_BPP(format) / 8);
+    size = stride * height;
+
+    fd = create_screenshot_file(size);
+    if (fd < 0) {
+        weston_log("screenshot: failed to create file of %zu bytes: %m\n",
+                   size);
+        ivi_screenshot_send_error(l->screenshot, IVI_SCREENSHOT_ERROR_IO_ERROR,
+                                  "failed to create screenshot file");
+        goto err_fd;
+    }
+
+    readpixs = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (readpixs == MAP_FAILED) {
+        weston_log("screenshot: failed to mmap %zu bytes: %m\n", size);
+        ivi_screenshot_send_error(l->screenshot, IVI_SCREENSHOT_ERROR_IO_ERROR,
+                                  "failed to create screenshot");
+        goto err_mmap;
+    }
+
+    if (output->compositor->renderer->read_pixels(output, format, readpixs,
+                                                  0, 0, width, height) < 0) {
+        ivi_screenshot_send_error(
+            l->screenshot, IVI_SCREENSHOT_ERROR_NOT_SUPPORTED,
+            "screenshot of given output is not supported by renderer");
+        goto err_readpix;
+    }
+
+    if (output->compositor->capabilities & WESTON_CAP_CAPTURE_YFLIP)
+        flip_y(stride, height, readpixs);
+
+    ivi_screenshot_send_done(l->screenshot, fd, width, height, stride,
+                             shm_format, timespec_to_msec(&output->frame_time));
+
+err_readpix:
+    munmap(readpixs, size);
+err_mmap:
+    close(fd);
+err_fd:
+    wl_resource_destroy(l->screenshot);
+}
+
+static void
+screenshot_output_destroyed(struct wl_listener *listener, void *data)
+{
+    struct screenshot_frame_listener *l =
+        wl_container_of(listener, l, output_destroyed);
+
+    ivi_screenshot_send_error(l->screenshot, IVI_SCREENSHOT_ERROR_NO_OUTPUT,
+                              "the output has been destroyed");
+    wl_resource_destroy(l->screenshot);
+}
+
+static void
+screenshot_frame_listener_destroy(struct wl_resource *resource)
+{
+    struct screenshot_frame_listener *l = wl_resource_get_user_data(resource);
+
+    wl_list_remove(&l->frame_listener.link);
+    wl_list_remove(&l->output_destroyed.link);
+    free(l);
 }
 
 static void
 controller_screen_screenshot(struct wl_client *client,
                              struct wl_resource *resource,
-                             struct wl_resource *buffer_resource,
                              uint32_t id)
 {
     struct iviscreen *iviscrn = wl_resource_get_user_data(resource);
-    struct ivi_screenshooter *screenshooter = NULL;
+    struct screenshot_frame_listener *l;
+    (void)client;
 
-    screenshooter = malloc(sizeof(struct ivi_screenshooter));
-    if(screenshooter == NULL) {
+    l = malloc(sizeof *l);
+    if(l == NULL) {
         wl_resource_post_no_memory(resource);
         return;
     }
 
-    screenshooter->screenshot = wl_resource_create(client, &ivi_screenshot_interface, 1, id);
-    if (screenshooter->screenshot == NULL) {
+    l->screenshot =
+        wl_resource_create(client, &ivi_screenshot_interface, 1, id);
+
+    if (l->screenshot == NULL) {
         wl_resource_post_no_memory(resource);
-        goto free;
+        free(l);
+        return;
     }
 
     if (!iviscrn) {
-        ivi_screenshot_send_error(screenshooter->screenshot, IVI_SCREENSHOT_ERROR_NO_OUTPUT);
-        goto error;
+        ivi_screenshot_send_error(l->screenshot, IVI_SCREENSHOT_ERROR_NO_OUTPUT,
+                                  "the output is already destroyed");
+        wl_resource_destroy(l->screenshot);
+        free(l);
+        return;
     }
 
-    screenshooter->output = iviscrn->output;
-    struct weston_buffer *buffer = weston_buffer_from_resource(screenshooter->output->compositor, buffer_resource);
-    if (buffer == NULL) {
-        ivi_screenshot_send_error(screenshooter->screenshot, IVI_SCREENSHOT_ERROR_NO_MEMORY);
-        goto error;
-    }
-
-    wl_resource_set_implementation(screenshooter->screenshot, NULL, screenshooter, controller_screenshoot_destroy);
-    weston_screenshooter_shoot(screenshooter->output, buffer, controller_screenshooter_done, screenshooter);
-    return;
-
-error:
-    wl_resource_destroy(screenshooter->screenshot);
-free:
-    free(screenshooter);
+    wl_resource_set_implementation(l->screenshot, NULL, l,
+                                   screenshot_frame_listener_destroy);
+    l->output_destroyed.notify = screenshot_output_destroyed;
+    wl_signal_add(&iviscrn->output->destroy_signal, &l->output_destroyed);
+    l->frame_listener.notify = controller_screenshot_notify;
+    wl_signal_add(&iviscrn->output->frame_signal, &l->frame_listener);
+    iviscrn->output->disable_planes++;
+    weston_output_damage(iviscrn->output);
 }
 
 static void
@@ -1511,15 +1668,10 @@ create_surface(struct ivishell *shell,
     if (shell->bkgnd_surface_id != (int32_t)id_surface) {
         wl_list_insert(&shell->list_surface, &ivisurf->link);
 
-        if((id_surface == IVI_INVALID_ID) && (shell->set_surface_id)){
-            shell->set_surface_id(shell->id_agent, layout_surface);
-            id_surface = lyt->get_id_of_surface(layout_surface);
-        }
-
         wl_list_for_each(controller, &shell->list_controller, link) {
             if (controller->resource)
                 ivi_wm_send_surface_created(controller->resource, id_surface);
-        }
+            }
 
         ivisurf->property_changed.notify = send_surface_prop;
         lyt->surface_add_listener(layout_surface, &ivisurf->property_changed);
@@ -1668,9 +1820,18 @@ surface_event_configure(struct wl_listener *listener, void *data)
 
     surface_id = lyt->get_id_of_surface(layout_surface);
     if (shell->bkgnd_surface_id == (int32_t)surface_id) {
+        float red, green, blue, alpha;
 
         if (!shell->bkgnd_view) {
             w_surface = lyt->surface_get_weston_surface(layout_surface);
+
+            alpha = ((shell->bkgnd_color >> 24) & 0xFF) / 255.0F;
+            red = ((shell->bkgnd_color >> 16) & 0xFF) / 255.0F;
+            green = ((shell->bkgnd_color >> 8) & 0xFF) / 255.0F;
+            blue = (shell->bkgnd_color & 0xFF) / 255.0F;
+
+            weston_surface_set_color(w_surface, red, green, blue, alpha);
+
             wl_list_init(&shell->bkgnd_transform.link);
             shell->bkgnd_view = weston_view_create(w_surface);
             weston_layer_entry_insert(&shell->bkgnd_layer.view_list,
@@ -1707,13 +1868,6 @@ surface_event_configure(struct wl_listener *listener, void *data)
         send_surface_event(ctrl, ivisurf->layout_surface, surface_id, ivisurf->prop,
                            IVI_NOTIFICATION_CONFIGURE);
     }
-}
-
-static void
-desktop_surface_event_configure(struct wl_listener *listener, void *data)
-{
-    struct ivishell *shell = wl_container_of(listener, shell, desktop_surface_configured);
-    surface_event_configure(&shell->surface_configured, data);
 }
 
 static int32_t
@@ -1826,7 +1980,7 @@ get_config(struct weston_compositor *compositor, struct ivishell *shell)
 
 	weston_config_section_get_int(section,
                        "bkgnd-surface-id",
-                       &shell->bkgnd_surface_id, -2);
+                       &shell->bkgnd_surface_id, -1);
 
 	weston_config_section_get_string(section,
 	                   "debug-scopes",
@@ -1895,7 +2049,6 @@ ivi_shell_destroy(struct wl_listener *listener, void *data)
 	wl_list_remove(&shell->output_resized.link);
 
 	wl_list_remove(&shell->surface_configured.link);
-    wl_list_remove(&shell->desktop_surface_configured.link);
 	wl_list_remove(&shell->surface_removed.link);
 	wl_list_remove(&shell->surface_created.link);
 
@@ -1959,12 +2112,10 @@ init_ivi_shell(struct weston_compositor *ec, struct ivishell *shell)
     shell->surface_created.notify = surface_event_create;
     shell->surface_removed.notify = surface_event_remove;
     shell->surface_configured.notify = surface_event_configure;
-    shell->desktop_surface_configured.notify = desktop_surface_event_configure;
 
     lyt->add_listener_create_surface(&shell->surface_created);
     lyt->add_listener_remove_surface(&shell->surface_removed);
     lyt->add_listener_configure_surface(&shell->surface_configured);
-    lyt->add_listener_configure_desktop_surface(&shell->desktop_surface_configured);
 
     shell->output_created.notify = output_created_event;
     shell->output_destroyed.notify = output_destroyed_event;
@@ -2008,7 +2159,7 @@ load_input_module(struct ivishell *shell)
         return 0;
     }
 
-    input_module_init = weston_load_module(input_module, "input_controller_module_init", NULL);
+    input_module_init = wet_load_module_entrypoint(input_module, "input_controller_module_init");
     if (!input_module_init)
         return -1;
 
@@ -2068,7 +2219,8 @@ static int load_id_agent_module(struct ivishell *shell)
     struct weston_config_section *section;
     char *id_agent_module = NULL;
 
-    int (*id_agent_module_init)(struct ivishell *shell);
+    int (*id_agent_module_init)(struct weston_compositor *compositor,
+            const struct ivi_layout_interface *interface);
 
     section = weston_config_get_section(config, "ivi-shell", NULL, NULL);
 
@@ -2079,11 +2231,11 @@ static int load_id_agent_module(struct ivishell *shell)
         return 0;
     }
 
-    id_agent_module_init = weston_load_module(id_agent_module, "id_agent_module_init", NULL);
+    id_agent_module_init = wet_load_module_entrypoint(id_agent_module, "id_agent_module_init");
     if (!id_agent_module_init)
         return -1;
 
-    if (id_agent_module_init(shell) != 0) {
+    if (id_agent_module_init(shell->compositor, shell->interface) != 0) {
         weston_log("ivi-controller: Initialization of id-agent module failed\n");
         return -1;
     }

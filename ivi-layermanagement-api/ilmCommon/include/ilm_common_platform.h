@@ -32,7 +32,7 @@ typedef struct _ILM_COMMON_PLATFORM_FUNC
     ilmErrorTypes (*destroy)();
 } ILM_COMMON_PLATFORM_FUNC;
 
-extern ILM_COMMON_PLATFORM_FUNC gIlmCommonPlatformFunc;
+ILM_COMMON_PLATFORM_FUNC gIlmCommonPlatformFunc;
 
 void init_ilmCommonPlatformTable();
 
