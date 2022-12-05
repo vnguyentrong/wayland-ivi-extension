@@ -291,6 +291,75 @@ ilm_setInputFocus(t_ilm_surface *surfaceIDs, t_ilm_uint num_surfaces,
     return returnValue;
 }
 
+static ilmErrorTypes
+ilm_getValidSurfaceIds(struct wl_list *surfaces_resource,
+                       struct wl_array *surf_arr, t_ilm_surface *surfaceIDs,
+                       t_ilm_uint num_surfs)
+{
+    struct ilm_control_context *ctx;
+    struct surface_context *ctx_surf;
+    t_ilm_uint i;
+    t_ilm_surface *surf_id;
+
+    for (i = 0; i < num_surfs; i++) {
+        t_ilm_uint found_surface = 0;
+        wl_list_for_each(ctx_surf, surfaces_resource, link) {
+            if (ctx_surf->id_surface == surfaceIDs[i]) {
+                found_surface = 1;
+                break;
+            }
+        }
+        if (found_surface == 1) {
+            surf_id = wl_array_add(surf_arr, sizeof(t_ilm_surface));
+            *surf_id = ctx_surf->id_surface;
+        }
+    }
+    return ILM_SUCCESS;
+}
+
+ILM_EXPORT ilmErrorTypes
+ilm_setInputFocusAtomic(t_ilm_surface *surfaceDstIds, t_ilm_uint num_dst,
+                        t_ilm_surface *surfaceSrcIds, t_ilm_uint num_src,
+                        ilmInputDevice bitmask)
+{
+    ilmErrorTypes returnValue = ILM_FAILED;
+    struct ilm_control_context *ctx;
+    struct wl_array surfs_dst, surfs_src;
+
+    if ((surfaceDstIds == NULL && surfaceSrcIds == NULL) ||
+        (num_dst == 0 && num_src == 0)) {
+        fprintf(stderr, "Invalid Argument\n");
+        return ILM_FAILED;
+    }
+
+    if (bitmask & (ILM_INPUT_DEVICE_POINTER | ILM_INPUT_DEVICE_TOUCH)
+        && num_dst > 1) {
+        fprintf(stderr,
+                "Cannot change pointer or touch focus for multiple surfaces\n");
+        return ILM_FAILED;
+    }
+    ctx = sync_and_acquire_instance();
+
+    wl_array_init(&surfs_dst);
+    wl_array_init(&surfs_src);
+
+    ilm_getValidSurfaceIds(&ctx->wl.list_surface,
+                           &surfs_src, surfaceSrcIds, num_src);
+    ilm_getValidSurfaceIds(&ctx->wl.list_surface,
+                           &surfs_dst, surfaceDstIds, num_dst);
+
+    if (surfs_dst.size != 0 || surfs_src.size != 0) {
+        ivi_input_set_input_focus_atomic(ctx->wl.input_controller,
+                                         &surfs_dst, &surfs_src, bitmask);
+        returnValue = ILM_SUCCESS;
+    }
+
+    wl_array_release(&surfs_dst);
+    wl_array_release(&surfs_src);
+    release_instance();
+    return returnValue;
+}
+
 ILM_EXPORT ilmErrorTypes
 ilm_getInputFocus(t_ilm_surface **surfaceIDs, ilmInputDevice **bitmasks,
                   t_ilm_uint *num_ids)

@@ -21,7 +21,7 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
     </copyright>
-    <interface name="ivi_input" version="2">
+    <interface name="ivi_input" version="3">
         <description summary="controller interface to the input system">
             This includes handling the existence of seats, seat capabilities,
             seat acceptance and input focus.
@@ -115,5 +115,22 @@
             <arg name="screen" type="uint"/>
             <arg name="enabled" type="int"/>
         </event>
+
+        <!-- Version 3 additions -->
+
+        <request name="set_input_focus_atomic" since="3">
+            <description summary="change input focus of surfaces">
+                Move input focus from source surfaces to destination surfaces in ivi compositor.
+                If the surface has input focus, all non-graphical inputs (e.g. keyboard) are
+                directed to the application providing the content for this surface.
+                Input focus of multiple surfaces can be unset and set atomically, with
+                respect to input events. This avoids losing input events when the user
+                want to move input focus from src to dst surfaces list.
+            </description>
+            <arg name="surfaceDstIds" type="array"/>
+            <arg name="surfaceSrcIds" type="array"/>
+            <arg name="device" type="uint"/>
+        </request>
+
     </interface>
 </protocol>

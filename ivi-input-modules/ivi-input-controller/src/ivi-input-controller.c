@@ -1237,6 +1237,23 @@ setup_input_focus(struct input_context *ctx, uint32_t surface,
 }
 
 static void
+input_set_input_focus_atomic(struct wl_client *client,
+                             struct wl_resource *resource,
+                             struct wl_array *surfaceDstIds,
+                             struct wl_array *surfaceSrcIds,
+                             uint32_t device)
+{
+    struct input_context *ctx = wl_resource_get_user_data(resource);
+    uint32_t *surf;
+
+    wl_array_for_each(surf, surfaceSrcIds)
+        setup_input_focus(ctx, *surf, device, false);
+
+    wl_array_for_each(surf, surfaceDstIds)
+        setup_input_focus(ctx, *surf, device, true);
+}
+
+static void
 input_set_input_focus(struct wl_client *client,
                                  struct wl_resource *resource,
                                  uint32_t surface, uint32_t device,
@@ -1336,7 +1353,8 @@ input_set_input_acceptance(struct wl_client *client,
 
 static const struct ivi_input_interface input_implementation = {
     input_set_input_focus,
-    input_set_input_acceptance
+    input_set_input_acceptance,
+    input_set_input_focus_atomic
 };
 
 static void
@@ -1524,7 +1542,7 @@ input_controller_init(struct ivishell *shell)
                 successful_init_stage++;
             break;
         case 1:
-            if (wl_global_create(shell->compositor->wl_display, &ivi_input_interface, 2,
+            if (wl_global_create(shell->compositor->wl_display, &ivi_input_interface, 3,
                                  ctx, bind_ivi_input) != NULL) {
                 successful_init_stage++;
             }

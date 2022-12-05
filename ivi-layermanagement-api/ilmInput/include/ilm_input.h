@@ -101,6 +101,30 @@ ilm_setInputFocus(t_ilm_surface *surfaceIDs, t_ilm_uint num_surfaces,
                   ilmInputDevice bitmask, t_ilm_bool is_set);
 
 /**
+ * \brief      Change input focus on source surfaces to destination surfaces
+ *             for the given device types.
+ * \ingroup    ilmControl
+ * \param[in]  surfaceDstIds   An array of surface IDs whose input focus
+ *                         will be set. The non-exits surfaces will
+ *			   be not added to set surfaces list. The invalid
+ *			   (has input focus) surfaces cannot be set.
+ * \param[in]  num_dst     The number of surfaces in surfaceDstIds
+ * \param[in]  surfaceSrcIds   An array of surface IDs whose input focus
+ *                         will be unset. The non-exits surfaces will
+ *			   be not added to unset surfaces list. The invalid
+ *			   (has no input focus) surfaces cannot be unset.
+ * \param[in]  num_src     The number of surfaces in surfaceSrcIds
+ * \param[in]  bitmask     A bitmask of the types of device for which focus
+ *                         will be set
+ * \return     ILM_SUCCESS if the method call was successful
+ * \return     ILM_FAILED  if the method call was unsuccessful
+ */
+ilmErrorTypes
+ilm_setInputFocusAtomic(t_ilm_surface *surfaceDstIds, t_ilm_uint num_dst,
+                        t_ilm_surface *surfaceSrcIds, t_ilm_uint num_src,
+                        ilmInputDevice bitmask);
+
+/**
  * \brief      Get all surface IDs and their corresponding focus bitmasks
  * \ingroup    ilmControl
  * \param[out] surfaceIDs  A pointer to the memory where an array of surface

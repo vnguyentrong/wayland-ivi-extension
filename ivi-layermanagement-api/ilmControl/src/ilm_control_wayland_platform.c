@@ -1016,7 +1016,7 @@ registry_handle_control(void *data,
 
     } else if (strcmp(interface, "ivi_input") == 0) {
         ctx->input_controller =
-            wl_registry_bind(registry, name, &ivi_input_interface, 2);
+            wl_registry_bind(registry, name, &ivi_input_interface, 3);
 
         if (ctx->input_controller == NULL) {
             fprintf(stderr, "Failed to registry bind input controller\n");
