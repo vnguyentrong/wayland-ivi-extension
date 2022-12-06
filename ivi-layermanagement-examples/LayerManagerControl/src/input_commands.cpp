@@ -250,3 +250,41 @@ COMMAND3(55,"get surface <surfaceid> input acceptance")
     }
     free(array);
 }
+
+//=============================================================================
+COMMAND3(56,"move input focus pointer|keyboard|touch|all from [<idarraysrc>] to [<idarraydst>]")
+//=============================================================================
+{
+    t_ilm_surface *surfaceIDsSrc, *surfaceIDsDst;
+    t_ilm_uint num_surfs_src, num_surfs_dst;
+    ilmInputDevice bitmask = 0;
+
+    if (input->contains("pointer"))
+        bitmask |= ILM_INPUT_DEVICE_POINTER;
+    if (input->contains("keyboard"))
+        bitmask |= ILM_INPUT_DEVICE_KEYBOARD;
+    if (input->contains("touch"))
+        bitmask |= ILM_INPUT_DEVICE_TOUCH;
+    if (input->contains("all"))
+        bitmask |= ILM_INPUT_DEVICE_ALL;
+
+    input->getUintArray("idarraysrc", &surfaceIDsSrc, &num_surfs_src);
+    input->getUintArray("idarraydst", &surfaceIDsDst, &num_surfs_dst);
+
+    cout << "setting input focus in LayerManagerControl" << endl;
+    ilmErrorTypes callResult =
+        ilm_setInputFocusAtomic(surfaceIDsDst, num_surfs_dst,
+                                surfaceIDsSrc, num_surfs_src, bitmask);
+    if (ILM_SUCCESS != callResult)
+    {
+        cout << "LayerManagerService returned: " << ILM_ERROR_STRING(callResult) << endl;
+        cout << "Failed to set input focus" << endl;
+    }
+    else
+    {
+        cout << "LayerManagerService succeeded" << endl;
+    }
+
+    delete[] surfaceIDsSrc;
+    delete[] surfaceIDsDst;
+}
