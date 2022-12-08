@@ -77,6 +77,7 @@ struct screenshot_frame_listener {
     struct wl_listener frame_listener;
     struct wl_listener output_destroyed;
     struct wl_resource *screenshot;
+    struct iviscreen *screen;
 };
 
 struct screen_id_info {
@@ -1199,12 +1200,9 @@ flip_y(int32_t stride, int32_t height, uint32_t *data) {
 }
 
 static void
-controller_screenshot_notify(struct wl_listener *listener, void *data)
+controller_take_screenshot(struct screenshot_frame_listener *l,
+                           struct weston_output *output)
 {
-    struct screenshot_frame_listener *l =
-        wl_container_of(listener, l, frame_listener);
-
-    struct weston_output *output = data;
     int32_t width = 0;
     int32_t height = 0;
     int32_t stride = 0;
@@ -1214,7 +1212,12 @@ controller_screenshot_notify(struct wl_listener *listener, void *data)
     size_t size;
     pixman_format_code_t format = output->compositor->read_format;
 
+    l->screen->plane_state = PLANES_DISABLED;
+
     --output->disable_planes;
+
+    if (output->disable_planes == 0)
+        l->screen->plane_state = PLANES_ENABLED;
 
     // map to shm buffer format
     switch (format) {
@@ -1282,6 +1285,16 @@ err_fd:
 }
 
 static void
+controller_screenshot_notify(struct wl_listener *listener, void *data)
+{
+    struct screenshot_frame_listener *l =
+        wl_container_of(listener, l, frame_listener);
+    struct weston_output *output = data;
+
+    controller_take_screenshot(l, output);
+}
+
+static void
 screenshot_output_destroyed(struct wl_listener *listener, void *data)
 {
     struct screenshot_frame_listener *l =
@@ -1334,14 +1347,70 @@ controller_screen_screenshot(struct wl_client *client,
         return;
     }
 
+    l->screen = iviscrn;
+
     wl_resource_set_implementation(l->screenshot, NULL, l,
                                    screenshot_frame_listener_destroy);
-    l->output_destroyed.notify = screenshot_output_destroyed;
-    wl_signal_add(&iviscrn->output->destroy_signal, &l->output_destroyed);
-    l->frame_listener.notify = controller_screenshot_notify;
-    wl_signal_add(&iviscrn->output->frame_signal, &l->frame_listener);
-    iviscrn->output->disable_planes++;
-    weston_output_damage(iviscrn->output);
+    if (iviscrn->output->state < WESTON_OUTPUT_SLEEPING) {
+        switch (iviscrn->plane_state) {
+        case PLANES_ENABLED:
+            /* HW planes are not yet disabled for the output from ivi-controller */
+            if (iviscrn->output->disable_planes > 0) {
+                /* another module have disabled the HW planes for the output,
+                 * here the screenshot might not be reliable as we don't know if
+                 * GPU composition is enforced at the moment.
+                 */
+                iviscrn->plane_state = PLANES_DISABLED;
+            }
+            else {
+                /* disable the planes and schedule a repaint */
+                iviscrn->plane_state = PLANES_DISABLE_SCHEDULED;
+            }
+            break;
+        case PLANES_DISABLE_SCHEDULED:
+            /* disable of HW planes already scheduled from another client.
+             * we need to wait for new-frame signal as GPU composition is not
+             * yet enforced.
+             */
+            break;
+        case PLANES_DISABLED:
+            /* HW planes are already disabled, copy screen content. */
+            if (iviscrn->output->disable_planes == 0) {
+                /* earlier another module had disabled the planes for the output,
+                 * but now enabled and we are unaware.
+                 */
+                iviscrn->plane_state = PLANES_DISABLE_SCHEDULED;
+            }
+            break;
+        default:
+	    break;
+        }
+    }
+    else {
+        /* HW planes are already disabled as Weston output DPMS is off */
+        iviscrn->plane_state = PLANES_DISABLED;
+    }
+
+    if (iviscrn->plane_state == PLANES_DISABLE_SCHEDULED) {
+        l->output_destroyed.notify = screenshot_output_destroyed;
+        wl_signal_add(&iviscrn->output->destroy_signal, &l->output_destroyed);
+        l->frame_listener.notify = controller_screenshot_notify;
+        wl_signal_add(&iviscrn->output->frame_signal, &l->frame_listener);
+
+        iviscrn->output->disable_planes++;
+        weston_output_damage(iviscrn->output);
+    }
+    else if (iviscrn->plane_state == PLANES_DISABLED) {
+        wl_list_init(&l->frame_listener.link);
+        wl_list_init(&l->output_destroyed.link);
+
+        /* We are blindly decrementing the disable_planes flag in
+         * controller_take_screenshot(). Increment the flag so that
+         * commen logic could be reused for both cases.
+         */
+        iviscrn->output->disable_planes++;
+        controller_take_screenshot(l, iviscrn->output);
+    }
 }
 
 static void
@@ -1550,6 +1619,8 @@ create_screen(struct ivishell *shell, struct weston_output *output)
 
     wl_list_insert(&shell->list_screen, &iviscrn->link);
     wl_list_init(&iviscrn->resource_list);
+
+    iviscrn->plane_state = PLANES_ENABLED;
 
     return;
 }
