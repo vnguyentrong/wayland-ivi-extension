@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="weston_simple">
+
+  <copyright>
+    Copyright (C) 2022 BOSCH GLOBAL SOFTWARE
+    AUTHORS: Au Doan Ngoc
+    DATE: 02/12/2022
+  </copyright>
+
+  <interface name="weston_simple" version="1">
+    <description summary="The simple protocol to send and receive a signal">
+    </description>
+
+    <request name="send_mess">
+      <arg name="signal_send" type="uint"/>
+    </request>
+
+    <event name="response_mess">
+      <arg name="signal_response" type="uint"/>
+    </event>
+
+  </interface>
+</protocol>

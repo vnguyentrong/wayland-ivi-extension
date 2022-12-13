@@ -43,6 +43,21 @@ add_custom_command(
     DEPENDS ${CMAKE_SOURCE_DIR}/protocol/ivi-application.xml
 )
 
+add_custom_command(
+    OUTPUT  weston-simple-client-protocol.h
+    COMMAND ${WAYLAND_SCANNER_EXECUTABLE} client-header
+            < ${CMAKE_SOURCE_DIR}/protocol/weston-simple.xml
+            > ${CMAKE_CURRENT_BINARY_DIR}/weston-simple-client-protocol.h
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/weston-simple.xml
+)
+
+add_custom_command(
+    OUTPUT  weston-simple-protocol.c
+    COMMAND ${WAYLAND_SCANNER_EXECUTABLE} code
+            < ${CMAKE_SOURCE_DIR}/protocol/weston-simple.xml
+            > ${CMAKE_CURRENT_BINARY_DIR}/weston-simple-protocol.c
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/weston-simple.xml
+)
 
 include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
@@ -58,6 +73,8 @@ link_directories(
 add_library(${PROJECT_NAME} SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/ivi-application-client-protocol.h
     ${CMAKE_CURRENT_BINARY_DIR}/ivi-application-protocol.c
+    ${CMAKE_CURRENT_BINARY_DIR}/weston-simple-client-protocol.h
+    ${CMAKE_CURRENT_BINARY_DIR}/weston-simple-protocol.c
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
