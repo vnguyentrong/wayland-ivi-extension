@@ -36,7 +36,6 @@ ilm_setInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint num_seats,
     struct surface_context *surface_ctx = NULL;
     struct accepted_seat *accepted_seat;
     struct seat_context *seat;
-    int surface_found = 0;
     int seat_found = 0;
 
     if ((seats == NULL) && (num_seats != 0)) {
@@ -46,15 +45,7 @@ ilm_setInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint num_seats,
 
     ctx = sync_and_acquire_instance();
 
-    wl_list_for_each(surface_ctx, &ctx->wl.list_surface, link) {
-        if (surface_ctx->id_surface == surfaceID) {
-            surface_found = 1;
-            break;
-        }
-    }
-
-    if (!surface_found) {
-        fprintf(stderr, "surface ID %d not found\n", surfaceID);
+    if (check_valid_surface(&ctx->wl.list_surface, surfaceID) != ILM_SUCCESS) {
         release_instance();
         return ILM_FAILED;
     }
@@ -117,7 +108,6 @@ ilm_getInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint *num_seats,
     struct ilm_control_context *ctx;
     struct surface_context *surface_ctx;
     struct accepted_seat *accepted_seat;
-    int surface_found = 0;
     int i;
 
     if ((seats == NULL) || (num_seats == NULL)) {
@@ -127,15 +117,7 @@ ilm_getInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint *num_seats,
 
     ctx = sync_and_acquire_instance();
 
-    wl_list_for_each(surface_ctx, &ctx->wl.list_surface, link) {
-        if (surface_ctx->id_surface == surfaceID) {
-            surface_found = 1;
-            break;
-        }
-    }
-
-    if (!surface_found) {
-        fprintf(stderr, "Surface ID %d not found\n", surfaceID);
+    if (check_valid_surface(&ctx->wl.list_surface, surfaceID) != ILM_SUCCESS) {
         release_instance();
         return ILM_FAILED;
     }
@@ -268,23 +250,11 @@ ilm_setInputFocus(t_ilm_surface *surfaceIDs, t_ilm_uint num_surfaces,
 
     ctx = sync_and_acquire_instance();
     for (i = 0; i < num_surfaces; i++) {
-        struct surface_context *ctx_surf;
-        int found_surface = 0;
-        wl_list_for_each(ctx_surf, &ctx->wl.list_surface, link) {
-            if (ctx_surf->id_surface == surfaceIDs[i]) {
-                found_surface = 1;
-                break;
-            }
-        }
-
-        if (!found_surface) {
-            fprintf(stderr, "Surface %d was not found\n", surfaceIDs[i]);
+        if (check_valid_surface(&ctx->wl.list_surface, surfaceIDs[i]) != ILM_SUCCESS)
             break;
-        }
 
         ivi_input_set_input_focus(ctx->wl.input_controller,
-                                             ctx_surf->id_surface,
-                                             bitmask, is_set);
+                                  surfaceIDs[i], bitmask, is_set);
         returnValue = ILM_SUCCESS;
     }
     release_instance();
@@ -296,22 +266,13 @@ ilm_getValidSurfaceIds(struct wl_list *surfaces_resource,
                        struct wl_array *surf_arr, t_ilm_surface *surfaceIDs,
                        t_ilm_uint num_surfs)
 {
-    struct ilm_control_context *ctx;
-    struct surface_context *ctx_surf;
     t_ilm_uint i;
     t_ilm_surface *surf_id;
 
     for (i = 0; i < num_surfs; i++) {
-        t_ilm_uint found_surface = 0;
-        wl_list_for_each(ctx_surf, surfaces_resource, link) {
-            if (ctx_surf->id_surface == surfaceIDs[i]) {
-                found_surface = 1;
-                break;
-            }
-        }
-        if (found_surface == 1) {
+        if (check_valid_surface(surfaces_resource, surfaceIDs[i]) == ILM_SUCCESS) {
             surf_id = wl_array_add(surf_arr, sizeof(t_ilm_surface));
-            *surf_id = ctx_surf->id_surface;
+            *surf_id = surfaceIDs[i];
         }
     }
     return ILM_SUCCESS;

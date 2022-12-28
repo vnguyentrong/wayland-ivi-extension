@@ -97,7 +97,8 @@ struct surface_context {
 };
 
 ilmErrorTypes impl_sync_and_acquire_instance(struct ilm_control_context *ctx);
-
+ilmErrorTypes impl_check_valid_surface(struct wl_list *list_surface,
+                                       t_ilm_surface surfaceID);
 void release_instance(void);
 
 #define sync_and_acquire_instance() ({ \
@@ -110,6 +111,9 @@ void release_instance(void);
     } \
     ctx; \
 })
+
+#define check_valid_surface(list_surface, surfaceID) \
+    impl_check_valid_surface(list_surface, surfaceID)
 
 #ifdef __cplusplus
 } /**/

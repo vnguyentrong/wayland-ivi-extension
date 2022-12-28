@@ -1582,6 +1582,26 @@ ilmErrorTypes impl_sync_and_acquire_instance(struct ilm_control_context *ctx)
     return ILM_SUCCESS;
 }
 
+ilmErrorTypes impl_check_valid_surface(struct wl_list *list_surface,
+                                       t_ilm_surface surfaceID)
+{
+    struct surface_context *surface_ctx;
+    int surface_found = 0;
+
+    wl_list_for_each(surface_ctx, list_surface, link) {
+        if (surface_ctx->id_surface == surfaceID) {
+            surface_found = 1;
+            break;
+        }
+    }
+
+    if (!surface_found) {
+        fprintf(stderr, "surface ID %d not found\n", surfaceID);
+        return ILM_FAILED;
+    }
+    return ILM_SUCCESS;
+}
+
 void release_instance(void)
 {
     struct ilm_control_context *ctx = &ilm_context;
