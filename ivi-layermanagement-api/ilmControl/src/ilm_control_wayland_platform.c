@@ -1016,7 +1016,7 @@ registry_handle_control(void *data,
 
     } else if (strcmp(interface, "ivi_input") == 0) {
         ctx->input_controller =
-            wl_registry_bind(registry, name, &ivi_input_interface, 2);
+            wl_registry_bind(registry, name, &ivi_input_interface, 3);
 
         if (ctx->input_controller == NULL) {
             fprintf(stderr, "Failed to registry bind input controller\n");
@@ -1579,6 +1579,26 @@ ilmErrorTypes impl_sync_and_acquire_instance(struct ilm_control_context *ctx)
         return ILM_FAILED;
     }
 
+    return ILM_SUCCESS;
+}
+
+ilmErrorTypes impl_check_valid_surface(struct wl_list *list_surface,
+                                       t_ilm_surface surfaceID)
+{
+    struct surface_context *surface_ctx;
+    int surface_found = 0;
+
+    wl_list_for_each(surface_ctx, list_surface, link) {
+        if (surface_ctx->id_surface == surfaceID) {
+            surface_found = 1;
+            break;
+        }
+    }
+
+    if (!surface_found) {
+        fprintf(stderr, "surface ID %d not found\n", surfaceID);
+        return ILM_FAILED;
+    }
     return ILM_SUCCESS;
 }
 
