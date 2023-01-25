@@ -45,7 +45,8 @@ ilm_setInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint num_seats,
 
     ctx = sync_and_acquire_instance();
 
-    if (check_valid_surface(&ctx->wl.list_surface, surfaceID) != ILM_SUCCESS) {
+    surface_ctx = fetch_valid_surface(&ctx->wl.list_surface, surfaceID);
+    if (!surface_ctx) {
         release_instance();
         return ILM_FAILED;
     }
@@ -117,7 +118,8 @@ ilm_getInputAcceptanceOn(t_ilm_surface surfaceID, t_ilm_uint *num_seats,
 
     ctx = sync_and_acquire_instance();
 
-    if (check_valid_surface(&ctx->wl.list_surface, surfaceID) != ILM_SUCCESS) {
+    surface_ctx = fetch_valid_surface(&ctx->wl.list_surface, surfaceID);
+    if (!surface_ctx) {
         release_instance();
         return ILM_FAILED;
     }
@@ -234,6 +236,7 @@ ilm_setInputFocus(t_ilm_surface *surfaceIDs, t_ilm_uint num_surfaces,
     ilmErrorTypes returnValue = ILM_FAILED;
     struct ilm_control_context *ctx;
     t_ilm_uint i;
+    struct surface_context *surface_ctx;
 
     if (surfaceIDs == NULL) {
         fprintf(stderr, "Invalid Argument\n");
@@ -250,7 +253,8 @@ ilm_setInputFocus(t_ilm_surface *surfaceIDs, t_ilm_uint num_surfaces,
 
     ctx = sync_and_acquire_instance();
     for (i = 0; i < num_surfaces; i++) {
-        if (check_valid_surface(&ctx->wl.list_surface, surfaceIDs[i]) != ILM_SUCCESS)
+        surface_ctx = fetch_valid_surface(&ctx->wl.list_surface, surfaceIDs[i]);
+        if(!surface_ctx)
             break;
 
         ivi_input_set_input_focus(ctx->wl.input_controller,
@@ -268,9 +272,11 @@ ilm_getValidSurfaceIds(struct wl_list *surfaces_resource,
 {
     t_ilm_uint i;
     t_ilm_surface *surf_id;
+    struct surface_context *surface_ctx;
 
     for (i = 0; i < num_surfs; i++) {
-        if (check_valid_surface(surfaces_resource, surfaceIDs[i]) == ILM_SUCCESS) {
+        surface_ctx = fetch_valid_surface(surfaces_resource, surfaceIDs[i]);
+        if (surface_ctx) {
             surf_id = wl_array_add(surf_arr, sizeof(t_ilm_surface));
             *surf_id = surfaceIDs[i];
         }
