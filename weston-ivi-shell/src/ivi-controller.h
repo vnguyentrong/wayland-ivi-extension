@@ -54,12 +54,24 @@ struct ivisurface {
     struct wl_list accepted_seat_list;
 };
 
+/**
+ * Track the status of HW composition for a given output which
+ * could be enabled/disbled using 'disable_planes' flag of the
+ * weston output structure.
+ */
+enum {
+    PLANES_ENABLED,		/* HW planes are enabled for the output */
+    PLANES_DISABLE_SCHEDULED,	/* HW planes are scheduled to be disabled */
+    PLANES_DISABLED 		/* HW planes are disabled for the output */
+};
+
 struct iviscreen {
     struct wl_list link;
     struct ivishell *shell;
     uint32_t id_screen;
     struct weston_output *output;
     struct wl_list resource_list;
+    unsigned int plane_state;
 };
 
 struct ivishell {
