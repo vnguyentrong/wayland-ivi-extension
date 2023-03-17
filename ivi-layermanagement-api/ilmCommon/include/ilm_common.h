@@ -84,6 +84,8 @@ ilmErrorTypes ilm_registerShutdownNotification(shutdownNotificationFunc callback
               callback function is defined as:
               void cb(t_ilm_screen_notification_type status, t_ilm_int id,
                       t_ilm_const_string name, void* user_data)
+              Restriction: As the SWGIII-42247 mentioned, the other ilm API functions
+              should not be called from the callback.
  * \param[in] user_data pointer to data which will be passed to a notification callback
  * \return ILM_SUCCESS if the method call was successful
  * \return ILM_FAILED if the client can not call the method on the service.
