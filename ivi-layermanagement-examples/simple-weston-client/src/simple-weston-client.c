@@ -915,7 +915,7 @@ Error:
         weston_debug_v1_destroy(wlcontext->debug_iface);
 
     destroy_streams(wlcontext);
-    wl_display_roundtrip(wlcontext->wl_display);
+    wl_display_flush(wlcontext->wl_display);
 
     if(wlcontext->thread_running)
     {
