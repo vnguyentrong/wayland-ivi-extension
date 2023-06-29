@@ -728,9 +728,6 @@ weston_dlt_thread_function(void *data)
 
 #endif
     wlcontext = (WaylandContextStruct*)data;
-    /*make the stdin as read end of the pipe*/
-    dup2(wlcontext->pipefd[0], STDIN_FILENO);
-
     while (running && wlcontext->thread_running)
     {
         char str[MAXSTRLEN] = {0};
@@ -919,16 +916,6 @@ int main (int argc, const char * argv[])
 #ifdef LIBWESTON_DEBUG_PROTOCOL
     if (!wl_list_empty(&wlcontext->stream_list) &&
             wlcontext->debug_iface) {
-        /* create the pipe b/w stdout and stdin
-         * stdout - write end
-         * stdin - read end
-         * weston will write to stdout and the
-         * dlt_ctx_thread will read from stdin */
-        if((pipe(wlcontext->pipefd)) < 0)
-            printf("Error in pipe() processing : %s", strerror(errno));
-
-        dup2(wlcontext->pipefd[1], STDOUT_FILENO);
-
         wlcontext->thread_running = 1;
         pthread_create(&wlcontext->dlt_ctx_thread, NULL,
                 weston_dlt_thread_function, wlcontext);
