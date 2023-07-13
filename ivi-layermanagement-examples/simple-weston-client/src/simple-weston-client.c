@@ -29,6 +29,7 @@
 #include <sys/mman.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sys/signalfd.h>
 #include <signal.h>
 #include <poll.h>
 
@@ -89,6 +90,7 @@ typedef struct _WaylandContext {
     int                     pipefd[2];
 #endif
     uint8_t                 enable_cursor;
+    int                     signal_fd;
 }WaylandContextStruct;
 
 struct debug_stream {
@@ -713,15 +715,12 @@ weston_dlt_thread_function(void *data)
     DLT_REGISTER_APP(apid, WESTON_DLT_APP_DESC);
     DLT_REGISTER_CONTEXT(weston_dlt_context, ctid, WESTON_DLT_CONTEXT_DESC);
 
-    /*make the stdin as read end of the pipe*/
-    dup2(wlcontext->pipefd[0], STDIN_FILENO);
-
     while (running && wlcontext->thread_running)
     {
         char str[MAXSTRLEN] = {0};
         int i = -1;
 
-        /* read from std-in(read end of pipe) till newline char*/
+        /* read from read end of pipe till newline char*/
         do {
             ssize_t size;
 
@@ -744,21 +743,39 @@ weston_dlt_thread_function(void *data)
 #endif
 
 static void
-signal_int(int signum)
+signal_int(int signal_fd)
 {
+    struct signalfd_siginfo fdsi;
+
+    if (read(signal_fd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
+        fprintf(stderr, "reading signalfd failed: %s\n",
+                strerror(errno));
+        return;
+    }
+
+    fprintf(stderr, "simple-weston-client: caught signal %d \n",
+            fdsi.ssi_signo);
+
     running = 0;
 }
 
 static int
-display_poll(struct wl_display *display, short int events)
+display_poll(struct wl_display *display, int signal_fd,
+             short int events)
 {
     int ret;
-    struct pollfd pfd[1];
+    struct pollfd pfd[2];
 
     pfd[0].fd = wl_display_get_fd(display);
     pfd[0].events = events;
+    pfd[1].fd = signal_fd;
+    pfd[1].events = POLLIN;
+
     do {
-        ret = poll(pfd, 1, -1);
+        ret = poll(pfd, 2, -1);
+
+        if (ret > 0 && pfd[1].revents)
+            signal_int(signal_fd);
     } while (ret == -1 && errno == EINTR && running);
 
     if(0 == running)
@@ -772,9 +789,11 @@ display_poll(struct wl_display *display, short int events)
  * the poll is continuing because the generated errno is EINTR,
  * so added running flag also to decide whether to continue polling or not */
 static int
-display_dispatch(struct wl_display *display)
+display_dispatch(WaylandContextStruct *wlcontext)
 {
     int ret;
+    int signal_fd = wlcontext->signal_fd;
+    struct wl_display *display = wlcontext->wl_display;
 
     if (wl_display_prepare_read(display) == -1)
         return wl_display_dispatch_pending(display);
@@ -785,7 +804,7 @@ display_dispatch(struct wl_display *display)
         if (ret != -1 || errno != EAGAIN)
             break;
 
-        if (display_poll(display, POLLOUT) == -1) {
+        if (display_poll(display, signal_fd, POLLOUT) == -1) {
             wl_display_cancel_read(display);
             return -1;
         }
@@ -798,7 +817,7 @@ display_dispatch(struct wl_display *display)
         return -1;
     }
 
-    if (display_poll(display, POLLIN) == -1) {
+    if (display_poll(display, signal_fd, POLLIN) == -1) {
         wl_display_cancel_read(display);
         return -1;
     }
@@ -814,16 +833,28 @@ int main (int argc, const char * argv[])
     WaylandContextStruct* wlcontext;
     BkGndSettingsStruct* bkgnd_settings;
 
-    struct sigaction sigint;
     int ret = 0;
-
-    sigint.sa_handler = signal_int;
-    sigemptyset(&sigint.sa_mask);
-    sigaction(SIGINT, &sigint, NULL);
-    sigaction(SIGTERM, &sigint, NULL);
-    sigaction(SIGSEGV, &sigint, NULL);
+    sigset_t mask;
 
     wlcontext = (WaylandContextStruct*)calloc(1, sizeof(WaylandContextStruct));
+    wlcontext->signal_fd = -1;
+
+    ret = sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    ret = sigprocmask(SIG_BLOCK, &mask, NULL);
+    if (ret == -1) {
+        fprintf(stderr, "sigprocmask failed with error '%s'\n",
+                strerror(errno));
+        return -1;
+    }
+
+    wlcontext->signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    if (wlcontext->signal_fd < 0) {
+        fprintf(stderr, "invalid signalfd file descriptor. error '%s'\n",
+                strerror(errno));
+        goto ErrorSignalFd;
+    }
 
     /*get bkgnd settings and create shm-surface*/
     bkgnd_settings = get_bkgnd_settings_cursor_info(wlcontext);
@@ -835,7 +866,17 @@ int main (int argc, const char * argv[])
     /*init debug stream list*/
     wl_list_init(&wlcontext->stream_list);
     get_debug_streams(wlcontext);
-    wlcontext->debug_fd = STDOUT_FILENO;
+    /* create the pipe to forward the data
+    * pipe[1] - write end
+    * pipe[0] - read end
+    * weston will write to pipe[1] and the
+    * dlt_ctx_thread will read from pipe[0] */
+    if((pipe(wlcontext->pipefd)) < 0) {
+        printf("Error in pipe() processing : %s", strerror(errno));
+        goto ErrorPipe;
+    }
+
+    wlcontext->debug_fd = wlcontext->pipefd[1];
 #else
     fprintf(stderr, "WARNING: weston_debug protocol is not available\n");
 #endif
@@ -855,19 +896,6 @@ int main (int argc, const char * argv[])
 #ifdef LIBWESTON_DEBUG_PROTOCOL
     if (!wl_list_empty(&wlcontext->stream_list) &&
             wlcontext->debug_iface) {
-        /* create the pipe b/w stdout and stdin
-         * stdout - write end
-         * stdin - read end
-         * weston will write to stdout and the
-         * dlt_ctx_thread will read from stdin */
-        ret = pipe(wlcontext->pipefd);
-        if (ret != 0) {
-            fprintf(stderr, "pipe() failed: ret=%i, errno=%i (%s)\n",
-                    ret, errno, strerror(errno));
-            return ret;
-        }
-        dup2(wlcontext->pipefd[1], STDOUT_FILENO);
-
         wlcontext->thread_running = 1;
         pthread_create(&wlcontext->dlt_ctx_thread, NULL,
                 weston_dlt_thread_function, wlcontext);
@@ -879,47 +907,34 @@ int main (int argc, const char * argv[])
     draw_bkgnd_surface(wlcontext);
 
     while (running && (ret != -1))
-        ret = display_dispatch(wlcontext->wl_display);
+        ret = display_dispatch(wlcontext);
 
 Error:
 #ifdef LIBWESTON_DEBUG_PROTOCOL
-    weston_debug_v1_destroy(wlcontext->debug_iface);
-
-    while (1) {
-        struct debug_stream *stream;
-        int empty = 1;
-
-        wl_list_for_each(stream, &wlcontext->stream_list, link)
-            if (stream->obj) {
-                empty = 0;
-                break;
-            }
-
-        if (empty)
-            break;
-
-        if (wl_display_dispatch(wlcontext->wl_display) < 0)
-            break;
-    }
+    if(wlcontext->debug_iface)
+        weston_debug_v1_destroy(wlcontext->debug_iface);
 
     destroy_streams(wlcontext);
-    wl_display_roundtrip(wlcontext->wl_display);
+    wl_display_flush(wlcontext->wl_display);
 
     if(wlcontext->thread_running)
     {
-        close(wlcontext->pipefd[1]);
-        close(STDOUT_FILENO);
         wlcontext->thread_running = 0;
         pthread_join(wlcontext->dlt_ctx_thread, NULL);
-        close(wlcontext->pipefd[0]);
     }
 #endif
 
     destroy_bkgnd_surface(wlcontext);
 ErrorContext:
     destroy_wayland_context(wlcontext);
-
+#ifdef LIBWESTON_DEBUG_PROTOCOL
+    close(wlcontext->pipefd[0]);
+    close(wlcontext->pipefd[1]);
+ErrorPipe:
+#endif
     free(bkgnd_settings);
+    close(wlcontext->signal_fd);
+ErrorSignalFd:
     free(wlcontext);
 
     return 0;
