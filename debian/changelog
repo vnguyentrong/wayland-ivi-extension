@@ -1,0 +1,37 @@
+wayland-ivi-extension (2.2.0-3) apertispro; urgency=medium
+
+  * debian/control: Remove non-existing build dependency libegl1
+    - Remove build dependency libegl1/libgles2 as it doesn't exist. The
+      vendor neutral EGL, GLES packages are provided by Mesa in v2021
+      and by GLVND from v2022 on-wards. Keep Mesa package as build
+      dependency as it provides the development files in v2021 and has
+      a install-time dependency to GLVND packages which provides the
+      development files from v2022 on-wards.
+      Ticket: LCCWPK-552
+
+ -- Rajendraprasad K J <KarammelJayakumar.Rajendraprasad@in.bosch.com>  Tue, 11 Apr 2023 19:25:19 +0530
+
+wayland-ivi-extension (2.2.0-2) apertispro; urgency=medium
+
+  * debian/patches/0012-simple-weston-client-Improve-signal-handling.patch:
+    - Currently signal handling is not properly done while listening for events
+      on wayland socket. As a result process waits on poll() for idefinite time
+      even after receiving signal. Modify poll() to accept signals while
+      listening to events on wayland socket.
+      Ticket: CBL-27
+  * debian/control:
+    - use debhelper 12 and set Standards-Version to 4.3.0
+  * debian/control
+    debian/copyright
+    debian/compat:
+    - Fix lintian findings
+  * debian:
+    - add lintian override files
+
+ -- Rajendraprasad K J <KarammelJayakumar.Rajendraprasad@in.bosch.com>  Wed, 22 Feb 2023 08:58:01 +0530
+
+wayland-ivi-extension (2.2.0-1) apertispro; urgency=medium
+
+  * Initial Release
+
+ -- Rajendraprasad K J <KarammelJayakumar.Rajendraprasad@in.bosch.com>  Mon, 28 Feb 2022 10:39:09 +0100

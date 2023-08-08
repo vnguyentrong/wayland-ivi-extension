@@ -1,0 +1,4 @@
+usr/lib/*/libivi*.so
+usr/lib/*/pkgconfig/ivi*.pc
+usr/include/ilm/ivi*.h
+usr/share/wayland-protocols

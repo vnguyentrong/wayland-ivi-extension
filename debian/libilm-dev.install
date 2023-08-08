@@ -1,0 +1,3 @@
+usr/lib/*/libilm*.so
+usr/lib/*/pkgconfig/ilm*.pc
+usr/include/ilm/ilm*.h

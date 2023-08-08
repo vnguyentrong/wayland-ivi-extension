@@ -1,0 +1,3 @@
+# libivi-application-protocol1 provides SO library named libivi-application2.2.0.
+# The SO library name should'nt be changed due to backward compatibility.
+libivi-application-protocol1 binary: package-name-doesnt-match-sonames

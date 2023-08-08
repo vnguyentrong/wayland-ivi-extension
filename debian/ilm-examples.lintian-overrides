@@ -1,0 +1,3 @@
+# adit-test-aoap-smoketest is intended to be installed on embedded systems,
+# and only for test purposes. No manual pages are available
+ilm-examples: binary-without-manpage

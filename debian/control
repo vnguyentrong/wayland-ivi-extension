@@ -1,0 +1,77 @@
+Source: wayland-ivi-extension
+Priority: optional
+Maintainer: Advanced Driver Information Technology Corporation, Advanced Driver Information Technology GmbH <adit-contact-apertis@lists.de.adit-jv.com>
+Uploaders: Rajendraprasad K J <KarammelJayakumar.Rajendraprasad@in.bosch.com>
+Build-Depends:
+ debhelper (>= 12),
+ pkg-config (>= 0.11.0),
+ cmake (>= 2.6),
+ quilt (>= 0.65),
+ libc6-dev (>= 2.17),
+ libwayland-dev (>= 1.15.0),
+ libwayland-dev:native (>= 1.15.0),
+ libweston-11-dev (>= 11.0.0),
+ weston (>= 9.0.0),
+ libpixman-1-dev,
+ libegl1-mesa-dev,
+ libgles2-mesa-dev,
+ libdlt-dev,
+ libpng-dev (>= 1.6.2),
+ zlib1g-dev (>= 1:1.1.4)
+Standards-Version: 4.3.0
+Section: graphics
+Homepage: https://at.projects.genivi.org
+
+Package: weston-ivi-plugins
+Architecture: linux-any
+Depends:
+ libilm2 (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends}
+Description: Weston plugins from 'wayland ivi extensions' set
+ -- runtime
+
+Package: libivi-application-protocol-dev
+Section: libdevel
+Architecture: linux-any
+Depends:
+ libivi-application-protocol1 (= ${binary:Version}),
+ ${misc:Depends}
+Description: Implementation of IVI application protocol
+ -- development files
+
+Package: libivi-application-protocol1
+Architecture: linux-any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends}
+Description: Implementation of IVI application protocol
+ -- shared library
+
+Package: libilm-dev
+Section: libdevel
+Architecture: linux-any
+Depends:
+ libilm2 (= ${binary:Version}),
+ ${misc:Depends}
+Description: Implementation of IVI layermanagement API -- development files
+ .
+ This package provides extensions to the Wayland protocol
+ for InVehicle Infortainment
+
+Package: ilm-examples
+Architecture: linux-any
+Depends:
+ libilm2 (= ${binary:Version}),
+ ${shlibs:Depends},
+ ${misc:Depends}
+Description: Set of IVI layermanagement examples
+ Examples shouldn't be used for production
+
+Package: libilm2
+Architecture: linux-any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends}
+Description: Implementation of IVI layermanagement API
+ -- shared library
